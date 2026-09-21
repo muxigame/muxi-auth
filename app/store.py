@@ -107,7 +107,7 @@ class Store:
                 count = int(db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0])
                 if count:
                     raise RuntimeError(
-                        "旧 Muxi Account schema 中存在账号，不能自动重建；请先执行显式数据迁移"
+                        "旧 muxi 账户 schema 中存在账号，不能自动重建；请先执行显式数据迁移"
                     )
                 db.executescript(
                     """
@@ -227,6 +227,14 @@ class Store:
                     upstream_subject TEXT,
                     raw_profile TEXT,
                     continue_to TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS launcher_auth_flows (
+                    flow_hash TEXT PRIMARY KEY,
+                    secret_hash TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    cancel_after TEXT,
                     created_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL
                 );
@@ -758,5 +766,81 @@ class Store:
             if account is None:
                 raise ValueError("账号创建失败")
             return account, str(signup["continue_to"])
+
+    def create_launcher_auth_flow(self, minutes: int = 20) -> tuple[str, str]:
+        flow = random_token(24)
+        secret = random_token(32)
+        now = utc_now()
+        with self._lock, self.connect() as db:
+            db.execute("DELETE FROM launcher_auth_flows WHERE expires_at<?", (iso(now),))
+            db.execute(
+                """INSERT INTO launcher_auth_flows
+                   (flow_hash,secret_hash,status,cancel_after,created_at,expires_at)
+                   VALUES(?,?, 'pending', NULL, ?, ?)""",
+                (
+                    token_hash(flow), token_hash(secret), iso(now),
+                    iso(now + timedelta(minutes=minutes)),
+                ),
+            )
+        return flow, secret
+
+    def launcher_auth_flow_resume(self, flow: str, secret: str) -> bool:
+        now = utc_now()
+        with self._lock, self.connect() as db:
+            cursor = db.execute(
+                """UPDATE launcher_auth_flows
+                   SET cancel_after=NULL
+                   WHERE flow_hash=? AND secret_hash=? AND status='pending' AND expires_at>?""",
+                (token_hash(flow), token_hash(secret), iso(now)),
+            )
+            return cursor.rowcount > 0
+
+    def launcher_auth_flow_cancel(self, flow: str, secret: str, grace_seconds: int = 2) -> bool:
+        now = utc_now()
+        with self._lock, self.connect() as db:
+            cursor = db.execute(
+                """UPDATE launcher_auth_flows
+                   SET cancel_after=?
+                   WHERE flow_hash=? AND secret_hash=? AND status='pending' AND expires_at>?""",
+                (
+                    iso(now + timedelta(seconds=grace_seconds)),
+                    token_hash(flow), token_hash(secret), iso(now),
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def launcher_auth_flow_status(self, flow: str, secret: str) -> str | None:
+        now = utc_now()
+        with self._lock, self.connect() as db:
+            row = db.execute(
+                """SELECT status,cancel_after,expires_at FROM launcher_auth_flows
+                   WHERE flow_hash=? AND secret_hash=?""",
+                (token_hash(flow), token_hash(secret)),
+            ).fetchone()
+            if row is None:
+                return None
+            if datetime.fromisoformat(str(row["expires_at"])) <= now:
+                db.execute(
+                    "DELETE FROM launcher_auth_flows WHERE flow_hash=?",
+                    (token_hash(flow),),
+                )
+                return "expired"
+            status = str(row["status"])
+            cancel_after = row["cancel_after"]
+            if status == "pending" and cancel_after:
+                if datetime.fromisoformat(str(cancel_after)) <= now:
+                    db.execute(
+                        "UPDATE launcher_auth_flows SET status='cancelled' WHERE flow_hash=?",
+                        (token_hash(flow),),
+                    )
+                    return "cancelled"
+            return status
+
+    def complete_launcher_auth_flow(self, flow: str, secret: str) -> None:
+        with self._lock, self.connect() as db:
+            db.execute(
+                "DELETE FROM launcher_auth_flows WHERE flow_hash=? AND secret_hash=?",
+                (token_hash(flow), token_hash(secret)),
+            )
 
 

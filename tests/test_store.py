@@ -135,5 +135,21 @@ class StoreTests(unittest.TestCase):
         self.assertIsNotNone(first)
         self.assertIsNone(self.store.consume_refresh_token(refresh, "native"))
 
+    def test_launcher_auth_flow_cancel_resume_and_complete(self):
+        flow, secret = self.store.create_launcher_auth_flow()
+        self.assertEqual("pending", self.store.launcher_auth_flow_status(flow, secret))
+
+        # 页面卸载先进入宽限期；刷新/内部跳转重新加载页面时可以撤销取消。
+        self.assertTrue(self.store.launcher_auth_flow_cancel(flow, secret, grace_seconds=30))
+        self.assertEqual("pending", self.store.launcher_auth_flow_status(flow, secret))
+        self.assertTrue(self.store.launcher_auth_flow_resume(flow, secret))
+        self.assertEqual("pending", self.store.launcher_auth_flow_status(flow, secret))
+
+        # 真正关闭页面后宽限期结束，启动器轮询应立即看到 cancelled。
+        self.assertTrue(self.store.launcher_auth_flow_cancel(flow, secret, grace_seconds=0))
+        self.assertEqual("cancelled", self.store.launcher_auth_flow_status(flow, secret))
+        self.store.complete_launcher_auth_flow(flow, secret)
+        self.assertIsNone(self.store.launcher_auth_flow_status(flow, secret))
+
 if __name__ == "__main__":
     unittest.main()

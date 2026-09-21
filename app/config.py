@@ -62,7 +62,7 @@ class Settings:
     smtp_ssl: bool = os.getenv("MUXI_SMTP_SSL", "1") == "1"
     smtp_username: str = os.getenv("MUXI_SMTP_USERNAME", "")
     smtp_password: str = os.getenv("MUXI_SMTP_PASSWORD", "")
-    smtp_from: str = os.getenv("MUXI_SMTP_FROM", "Muxi Account <no-reply@muxigame.com>")
+    smtp_from: str = os.getenv("MUXI_SMTP_FROM", "muxi 账户 <no-reply@muxigame.com>")
 
     # CZL Connect is an upstream identity broker. Keep compatibility with the
     # Client_ID / Client_Secret names already present in the local .env.

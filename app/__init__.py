@@ -1,2 +1,2 @@
-"""Muxi Account OAuth 2.0 / OpenID Connect service."""
+"""muxi 账户 OAuth 2.0 / OpenID Connect service."""
 

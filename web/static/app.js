@@ -28,6 +28,47 @@ function continueTarget() {
 
 function continueQuery() { return encodeURIComponent(continueTarget()); }
 
+let launcherFlow = null;
+let launcherFlowLeaving = false;
+
+function launcherFlowFromTarget(target) {
+  try {
+    const url = new URL(target, location.origin);
+    if (url.pathname !== '/oauth/authorize') return null;
+    const flow = url.searchParams.get('launcher_flow');
+    const secret = url.searchParams.get('launcher_flow_secret');
+    return flow && secret ? { flow, secret } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resumeLauncherFlow(target = continueTarget()) {
+  const info = launcherFlowFromTarget(target);
+  if (!info) return;
+  launcherFlow = info;
+  launcherFlowLeaving = false;
+  try {
+    const response = await fetch(
+      `/api/launcher/auth-flow/${encodeURIComponent(info.flow)}/resume?secret=${encodeURIComponent(info.secret)}`,
+      { method: 'POST', cache: 'no-store' },
+    );
+    if (!response.ok) launcherFlow = null;
+  } catch {}
+}
+
+function markLauncherFlowLeaving() {
+  launcherFlowLeaving = true;
+}
+
+function cancelLauncherFlowOnPageHide() {
+  if (!launcherFlow || launcherFlowLeaving) return;
+  const url = `/api/launcher/auth-flow/${encodeURIComponent(launcherFlow.flow)}/cancel?secret=${encodeURIComponent(launcherFlow.secret)}`;
+  try { navigator.sendBeacon(url); } catch {}
+}
+
+window.addEventListener('pagehide', cancelLauncherFlowOnPageHide);
+
 function clientLabel() {
   try {
     const target = new URL(continueTarget(), location.origin);
@@ -40,6 +81,7 @@ function clientLabel() {
 }
 
 function wireAuthContext() {
+  resumeLauncherFlow();
   const client = clientLabel();
   const context = $('auth-context');
   if (context && client) {
@@ -49,6 +91,7 @@ function wireAuthContext() {
   document.querySelectorAll('[data-preserve-continue]').forEach((link) => {
     const base = link.getAttribute('href').split('?')[0];
     link.href = `${base}?continue=${continueQuery()}`;
+    link.addEventListener('click', markLauncherFlowLeaving);
   });
 }
 
@@ -65,6 +108,7 @@ async function wireExternalProviders() {
     button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
     if (enabled) {
       button.href = `/external/${provider}/start?continue_to=${continueQuery()}`;
+      button.addEventListener('click', markLauncherFlowLeaving);
     } else {
       button.href = '#';
       button.title = '管理员尚未配置该第三方登录方式';
@@ -102,6 +146,7 @@ if ($('login-form')) {
     const form = Object.fromEntries(new FormData(event.currentTarget));
     try {
       await api('/api/account/login', { method: 'POST', body: JSON.stringify(form) });
+      markLauncherFlowLeaving();
       location.href = continueTarget();
     } catch (error) {
       showMessage(error.message, true);
@@ -135,6 +180,7 @@ if ($('register-form')) {
         a.href = result.verificationUrl;
         a.textContent = ' 开发模式：立即验证';
         a.style.marginLeft = '8px';
+        a.addEventListener('click', markLauncherFlowLeaving);
         $('message').appendChild(a);
       }
       event.currentTarget.reset();
@@ -154,6 +200,7 @@ if ($('external-complete-form')) {
       const signup = await api(`/api/external/signup?ticket=${encodeURIComponent(ticket)}`);
       $('external-provider').textContent = signup.provider === 'qq' ? 'QQ 账户' : '微信账户';
       $('external-nickname').value = signup.nickname || '';
+      if (signup.continue) resumeLauncherFlow(signup.continue);
     } catch (error) {
       showMessage(error.message, true);
       $('external-complete-form').hidden = true;
@@ -168,6 +215,7 @@ if ($('external-complete-form')) {
         method: 'POST',
         body: JSON.stringify(form),
       });
+      markLauncherFlowLeaving();
       location.href = result.continue || '/account';
     } catch (error) {
       showMessage(error.message, true);

@@ -1,6 +1,6 @@
-# Muxi Account
+# muxi 账户
 
-MuxiGame 的独立统一账户服务。它同时提供账户官网、OAuth 2.0 Authorization Server 和 OpenID Connect Provider。
+muxigame 的独立统一账户服务。它同时提供账户官网、OAuth 2.0 Authorization Server 和 OpenID Connect Provider。
 
 ## 已实现
 
@@ -29,9 +29,9 @@ python -m venv .venv
 
 `better-mc-launcher` 是 public native client，不存在 `client_secret`。它使用系统浏览器、Authorization Code + PKCE，并回调到 `127.0.0.1` 的随机端口。
 
-`better-mc-web` 是 confidential web client，需要在 Muxi Account 与 Better MC 网站两边配置相同的高熵 secret。
+`better-mc-web` 是 confidential web client，需要在 muxi 账户 与 Better MC 网站两边配置相同的高熵 secret。
 
 ## 安全边界
 
-Minecraft 本体目前不接 OAuth。Better MC Launcher 登录成功后只把 Muxi 用户名传给现有 OfflineAuth，因此游戏服务器侧仍保持当前离线 UUID 逻辑。
+Minecraft 本体目前不接 OAuth。Better MC Launcher 登录成功后只把 muxi 用户名传给现有 OfflineAuth，因此游戏服务器侧仍保持当前离线 UUID 逻辑。
 

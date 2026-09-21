@@ -43,7 +43,7 @@ store.seed_client(
 )
 
 app = FastAPI(
-    title="Muxi Account",
+    title="muxi 账户",
     version="1.0.0",
     docs_url="/api/docs" if settings.enable_docs else None,
     redoc_url=None,
@@ -69,7 +69,7 @@ async def security_headers(request: Request, call_next):
     )
     if settings.secure_cookies:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    if request.url.path.startswith(("/oauth", "/api/account", "/login", "/register", "/account")):
+    if request.url.path.startswith(("/oauth", "/api/account", "/api/launcher", "/login", "/register", "/account")):
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -123,11 +123,11 @@ def send_verification_email(email: str, nickname: str, verify_url: str) -> None:
     if not settings.smtp_host:
         return
     message = EmailMessage()
-    message["Subject"] = "验证你的 Muxi Account"
+    message["Subject"] = "验证你的 muxi 账户"
     message["From"] = settings.smtp_from
     message["To"] = email
     message.set_content(
-        f"你好 {nickname}，\n\n请打开下面的链接验证你的 Muxi Account：\n{verify_url}\n\n链接 24 小时内有效。"
+        f"你好 {nickname}，\n\n请打开下面的链接验证你的 muxi 账户：\n{verify_url}\n\n链接 24 小时内有效。"
     )
     smtp_cls = smtplib.SMTP_SSL if settings.smtp_ssl else smtplib.SMTP
     with smtp_cls(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
@@ -276,6 +276,43 @@ def external_providers() -> dict:
     return {"providers": provider_status()}
 
 
+@app.post("/api/launcher/auth-flow", status_code=201)
+def create_launcher_auth_flow() -> dict:
+    flow, secret = store.create_launcher_auth_flow()
+    return {"flow": flow, "secret": secret, "expiresIn": 1200}
+
+
+@app.get("/api/launcher/auth-flow/{flow}")
+def launcher_auth_flow_status(flow: str, secret: str = "") -> dict:
+    if not flow or not secret:
+        raise HTTPException(status_code=404, detail="启动器授权会话不存在")
+    status = store.launcher_auth_flow_status(flow, secret)
+    if status is None:
+        raise HTTPException(status_code=404, detail="启动器授权会话不存在")
+    return {"status": status}
+
+
+@app.post("/api/launcher/auth-flow/{flow}/resume")
+def resume_launcher_auth_flow(flow: str, secret: str = "") -> Response:
+    if not flow or not secret or not store.launcher_auth_flow_resume(flow, secret):
+        raise HTTPException(status_code=404, detail="启动器授权会话不存在")
+    return Response(status_code=204)
+
+
+@app.post("/api/launcher/auth-flow/{flow}/cancel")
+def cancel_launcher_auth_flow(flow: str, secret: str = "") -> Response:
+    if not flow or not secret or not store.launcher_auth_flow_cancel(flow, secret):
+        raise HTTPException(status_code=404, detail="启动器授权会话不存在")
+    return Response(status_code=204)
+
+
+@app.delete("/api/launcher/auth-flow/{flow}")
+def complete_launcher_auth_flow(flow: str, secret: str = "") -> Response:
+    if flow and secret:
+        store.complete_launcher_auth_flow(flow, secret)
+    return Response(status_code=204)
+
+
 @app.get("/external/{provider}/start")
 def external_start(provider: str, continue_to: str = "/account") -> RedirectResponse:
     if provider not in {"qq", "wechat"}:
@@ -341,6 +378,7 @@ def external_signup(ticket: str) -> dict:
     return {
         "provider": signup["provider"],
         "nickname": signup.get("provider_nickname") or "",
+        "continue": safe_continue(str(signup.get("continue_to") or "/account")),
     }
 
 
