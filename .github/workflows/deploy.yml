@@ -1,0 +1,70 @@
+name: Deploy tagged release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: muxi-auth-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require tag commit to be on master
+        run: |
+          git fetch origin master --no-tags
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Test
+        env:
+          MUXI_ISSUER: http://127.0.0.1:9000
+          MUXI_AUTH_DEV_VERIFY: "1"
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          PYTHONPATH=. python -m unittest discover -s tests -v
+
+      - name: Create release archive
+        run: git archive --format=tar.gz --output=muxi-auth-release.tar.gz "$GITHUB_SHA"
+
+      - name: Upload release
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: "muxi-auth-release.tar.gz,scripts/deploy.sh"
+          target: "/opt/muxi-auth/incoming"
+          overwrite: true
+
+      - name: Deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          command_timeout: 10m
+          script: |
+            mkdir -p /opt/muxi-auth/incoming
+            cp /opt/muxi-auth/incoming/scripts/deploy.sh /opt/muxi-auth/incoming/deploy.sh
+            chmod 0750 /opt/muxi-auth/incoming/deploy.sh
+            /opt/muxi-auth/incoming/deploy.sh /opt/muxi-auth/incoming/muxi-auth-release.tar.gz
