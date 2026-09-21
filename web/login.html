@@ -24,7 +24,7 @@
 
       <form id="login-form" class="identity-form">
         <label class="identity-field">
-          <span>邮箱或用户名</span>
+          <span>邮箱、用户名或 UID</span>
           <input name="identity" autocomplete="username" autofocus required>
         </label>
         <label class="identity-field">
@@ -38,6 +38,12 @@
           <button type="submit" class="identity-primary">登录</button>
         </div>
       </form>
+
+      <div class="identity-divider"><span>或</span></div>
+      <div class="identity-social">
+        <a class="identity-social-button" data-provider="qq" href="#" aria-disabled="true">使用 QQ 登录</a>
+        <a class="identity-social-button" data-provider="wechat" href="#" aria-disabled="true">使用微信登录</a>
+      </div>
     </section>
   </main>
 

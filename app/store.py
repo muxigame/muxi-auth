@@ -23,30 +23,42 @@ def iso(value: datetime) -> str:
 class Account:
     id: int
     subject: str
-    email: str
+    uid: int
     username: str
+    nickname: str
+    game_name: str
+    email: str | None
     role: str
-    verified: bool
+    email_verified: bool
     created_at: str
     last_login_at: str | None
 
     def claims(self) -> dict:
-        return {
+        claims = {
             "sub": self.subject,
-            "email": self.email,
-            "email_verified": self.verified,
+            "muxi_uid": self.uid,
             "preferred_username": self.username,
             "username": self.username,
+            "name": self.nickname,
+            "nickname": self.nickname,
+            "game_name": self.game_name,
             "role": self.role,
         }
+        if self.email:
+            claims["email"] = self.email
+            claims["email_verified"] = self.email_verified
+        return claims
 
     def public(self) -> dict:
         return {
             "id": self.subject,
+            "uid": self.uid,
             "email": self.email,
             "username": self.username,
+            "nickname": self.nickname,
+            "gameName": self.game_name,
             "role": self.role,
-            "verified": self.verified,
+            "verified": self.email_verified,
             "createdAt": self.created_at,
             "lastLoginAt": self.last_login_at,
         }
@@ -87,19 +99,55 @@ class Store:
 
     def _init_schema(self) -> None:
         with self._lock, self.connect() as db:
+            columns = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(accounts)").fetchall()
+            }
+            if columns and not {"uid", "nickname", "game_name"}.issubset(columns):
+                count = int(db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0])
+                if count:
+                    raise RuntimeError(
+                        "旧 Muxi Account schema 中存在账号，不能自动重建；请先执行显式数据迁移"
+                    )
+                db.executescript(
+                    """
+                    DROP TABLE IF EXISTS refresh_tokens;
+                    DROP TABLE IF EXISTS access_tokens;
+                    DROP TABLE IF EXISTS authorization_codes;
+                    DROP TABLE IF EXISTS web_sessions;
+                    DROP TABLE IF EXISTS email_verifications;
+                    DROP TABLE IF EXISTS accounts;
+                    """
+                )
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS accounts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     subject TEXT NOT NULL UNIQUE,
-                    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    uid INTEGER NOT NULL UNIQUE,
                     username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                    password_hash TEXT NOT NULL,
+                    nickname TEXT NOT NULL,
+                    game_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    password_hash TEXT,
                     role TEXT NOT NULL DEFAULT 'player',
-                    verified INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     last_login_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS uid_sequence (
+                    id INTEGER PRIMARY KEY CHECK(id=1),
+                    next_uid INTEGER NOT NULL
+                );
+                INSERT OR IGNORE INTO uid_sequence(id,next_uid) VALUES(1,10000);
+                CREATE TABLE IF NOT EXISTS account_emails (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    verified INTEGER NOT NULL DEFAULT 0,
+                    is_primary INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS account_primary_email
+                    ON account_emails(account_id) WHERE is_primary=1;
                 CREATE TABLE IF NOT EXISTS email_verifications (
                     account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
                     token_hash TEXT NOT NULL UNIQUE,
@@ -151,8 +199,69 @@ class Store:
                     expires_at TEXT NOT NULL,
                     revoked_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS external_identities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL,
+                    provider_subject TEXT NOT NULL,
+                    provider_nickname TEXT,
+                    upstream_subject TEXT,
+                    raw_profile TEXT,
+                    created_at TEXT NOT NULL,
+                    last_login_at TEXT,
+                    UNIQUE(provider, provider_subject)
+                );
+                CREATE TABLE IF NOT EXISTS external_oauth_states (
+                    state_hash TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL,
+                    code_verifier TEXT NOT NULL,
+                    continue_to TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS external_signups (
+                    token_hash TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL,
+                    provider_subject TEXT NOT NULL,
+                    provider_nickname TEXT,
+                    upstream_subject TEXT,
+                    raw_profile TEXT,
+                    continue_to TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
                 """
             )
+            for table, additions in {
+                "external_identities": {
+                    "upstream_subject": "TEXT",
+                    "raw_profile": "TEXT",
+                },
+                "external_oauth_states": {
+                    "code_verifier": "TEXT",
+                },
+                "external_signups": {
+                    "upstream_subject": "TEXT",
+                    "raw_profile": "TEXT",
+                },
+            }.items():
+                columns = {
+                    str(row["name"])
+                    for row in db.execute(f"PRAGMA table_info({table})").fetchall()
+                }
+                for name, column_type in additions.items():
+                    if name not in columns:
+                        db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
+
+    @staticmethod
+    def _account_query() -> str:
+        return """
+            SELECT a.*, e.email AS primary_email,
+                   COALESCE(e.verified,0) AS primary_email_verified
+            FROM accounts a
+            LEFT JOIN account_emails e
+              ON e.account_id=a.id AND e.is_primary=1
+        """
 
     @staticmethod
     def _account(row: sqlite3.Row | None) -> Account | None:
@@ -161,35 +270,53 @@ class Store:
         return Account(
             id=int(row["id"]),
             subject=str(row["subject"]),
-            email=str(row["email"]),
+            uid=int(row["uid"]),
             username=str(row["username"]),
+            nickname=str(row["nickname"]),
+            game_name=str(row["game_name"]),
+            email=str(row["primary_email"]) if row["primary_email"] is not None else None,
             role=str(row["role"]),
-            verified=bool(row["verified"]),
+            email_verified=bool(row["primary_email_verified"]),
             created_at=str(row["created_at"]),
             last_login_at=row["last_login_at"],
         )
 
-    def register(self, email: str, username: str, password: str) -> tuple[Account, str]:
+    @staticmethod
+    def _next_uid(db: sqlite3.Connection) -> int:
+        row = db.execute("SELECT next_uid FROM uid_sequence WHERE id=1").fetchone()
+        uid = int(row["next_uid"])
+        db.execute("UPDATE uid_sequence SET next_uid=? WHERE id=1", (uid + 1,))
+        return uid
+
+    def register(self, email: str, username: str, nickname: str, password: str) -> tuple[Account, str]:
         now = utc_now()
         raw_verify = random_token(32)
         with self._lock, self.connect() as db:
+            uid = self._next_uid(db)
             try:
                 cur = db.execute(
-                    """INSERT INTO accounts(subject,email,username,password_hash,created_at)
-                       VALUES(?,?,?,?,?)""",
-                    (str(uuid.uuid4()), email.lower(), username, hash_password(password), iso(now)),
+                    """INSERT INTO accounts(subject,uid,username,nickname,game_name,password_hash,created_at)
+                       VALUES(?,?,?,?,?,?,?)""",
+                    (str(uuid.uuid4()), uid, username, nickname, username, hash_password(password), iso(now)),
+                )
+                account_id = int(cur.lastrowid)
+                db.execute(
+                    """INSERT INTO account_emails(account_id,email,verified,is_primary,created_at)
+                       VALUES(?,?,0,1,?)""",
+                    (account_id, email.lower(), iso(now)),
                 )
             except sqlite3.IntegrityError as error:
                 text = str(error).lower()
                 if "email" in text:
                     raise ValueError("该邮箱已经注册") from error
                 raise ValueError("该用户名已经被使用") from error
-            account_id = int(cur.lastrowid)
             db.execute(
                 "INSERT INTO email_verifications(account_id,token_hash,expires_at) VALUES(?,?,?)",
                 (account_id, token_hash(raw_verify), iso(now + timedelta(hours=24))),
             )
-            account = self._account(db.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone())
+            account = self._account(
+                db.execute(self._account_query() + " WHERE a.id=?", (account_id,)).fetchone()
+            )
         return account, raw_verify  # type: ignore[return-value]
 
     def verify_email(self, raw_token: str) -> Account | None:
@@ -201,26 +328,36 @@ class Store:
             if row is None or datetime.fromisoformat(row["expires_at"]) < utc_now():
                 return None
             account_id = int(row["account_id"])
-            db.execute("UPDATE accounts SET verified=1 WHERE id=?", (account_id,))
+            db.execute(
+                "UPDATE account_emails SET verified=1 WHERE account_id=? AND is_primary=1",
+                (account_id,),
+            )
             db.execute("DELETE FROM email_verifications WHERE account_id=?", (account_id,))
-            return self._account(db.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone())
+            return self._account(
+                db.execute(self._account_query() + " WHERE a.id=?", (account_id,)).fetchone()
+            )
 
     def authenticate(self, identity: str, password: str) -> Account | None:
         with self._lock, self.connect() as db:
             row = db.execute(
-                "SELECT * FROM accounts WHERE email=? COLLATE NOCASE OR username=? COLLATE NOCASE",
-                (identity, identity),
+                self._account_query()
+                + """ WHERE a.username=? COLLATE NOCASE
+                       OR CAST(a.uid AS TEXT)=?
+                       OR e.email=? COLLATE NOCASE""",
+                (identity, identity, identity),
             ).fetchone()
-            if row is None or not verify_password(str(row["password_hash"]), password):
+            if row is None or row["password_hash"] is None or not verify_password(str(row["password_hash"]), password):
                 return None
             account = self._account(row)
-            if account is None or not account.verified:
+            if account is None or not account.email_verified:
                 raise PermissionError("请先完成邮箱验证")
             if needs_rehash(str(row["password_hash"])):
                 db.execute("UPDATE accounts SET password_hash=? WHERE id=?", (hash_password(password), account.id))
             now = iso(utc_now())
             db.execute("UPDATE accounts SET last_login_at=? WHERE id=?", (now, account.id))
-            return self._account(db.execute("SELECT * FROM accounts WHERE id=?", (account.id,)).fetchone())
+            return self._account(
+                db.execute(self._account_query() + " WHERE a.id=?", (account.id,)).fetchone()
+            )
 
     def create_web_session(self, account_id: int, days: int) -> str:
         raw = random_token(40)
@@ -237,8 +374,9 @@ class Store:
             return None
         with self.connect() as db:
             row = db.execute(
-                """SELECT a.* FROM web_sessions s JOIN accounts a ON a.id=s.account_id
-                   WHERE s.token_hash=? AND s.expires_at>?""",
+                self._account_query()
+                + """ JOIN web_sessions s ON s.account_id=a.id
+                       WHERE s.token_hash=? AND s.expires_at>?""",
                 (token_hash(raw), iso(utc_now())),
             ).fetchone()
             return self._account(row)
@@ -357,7 +495,9 @@ class Store:
             if not hmac.compare_digest(str(row["code_challenge"]), pkce_s256(verifier)):
                 return None
             db.execute("UPDATE authorization_codes SET used_at=? WHERE code_hash=?", (iso(now), token_hash(raw)))
-            account = self._account(db.execute("SELECT * FROM accounts WHERE id=?", (int(row["account_id"]),)).fetchone())
+            account = self._account(
+                db.execute(self._account_query() + " WHERE a.id=?", (int(row["account_id"]),)).fetchone()
+            )
             if account is None:
                 return None
             return account, str(row["scope"]), row["nonce"]
@@ -377,15 +517,19 @@ class Store:
             return None
         with self.connect() as db:
             row = db.execute(
-                """SELECT t.client_id,t.scope,a.* FROM access_tokens t
+                """SELECT a.*, e.email AS primary_email,
+                          COALESCE(e.verified,0) AS primary_email_verified,
+                          t.client_id AS token_client_id, t.scope AS token_scope
+                   FROM access_tokens t
                    JOIN accounts a ON a.id=t.account_id
+                   LEFT JOIN account_emails e ON e.account_id=a.id AND e.is_primary=1
                    WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>?""",
                 (token_hash(raw), iso(utc_now())),
             ).fetchone()
             account = self._account(row)
             if row is None or account is None:
                 return None
-            return account, str(row["client_id"]), str(row["scope"])
+            return account, str(row["token_client_id"]), str(row["token_scope"])
 
     def issue_refresh_token(self, account_id: int, client_id: str, scope: str, days: int) -> str:
         raw = random_token(48)
@@ -401,15 +545,20 @@ class Store:
         now = utc_now()
         with self._lock, self.connect() as db:
             row = db.execute(
-                """SELECT r.*,a.* FROM refresh_tokens r JOIN accounts a ON a.id=r.account_id
+                """SELECT a.*, e.email AS primary_email,
+                          COALESCE(e.verified,0) AS primary_email_verified,
+                          r.scope AS token_scope, r.expires_at AS token_expires_at
+                   FROM refresh_tokens r
+                   JOIN accounts a ON a.id=r.account_id
+                   LEFT JOIN account_emails e ON e.account_id=a.id AND e.is_primary=1
                    WHERE r.token_hash=? AND r.client_id=? AND r.revoked_at IS NULL""",
                 (token_hash(raw), client_id),
             ).fetchone()
-            if row is None or datetime.fromisoformat(row["expires_at"]) < now:
+            if row is None or datetime.fromisoformat(row["token_expires_at"]) < now:
                 return None
             db.execute("UPDATE refresh_tokens SET revoked_at=? WHERE token_hash=?", (iso(now), token_hash(raw)))
             account = self._account(row)
-            return (account, str(row["scope"])) if account else None
+            return (account, str(row["token_scope"])) if account else None
 
     def revoke(self, raw: str) -> None:
         hashed = token_hash(raw)
@@ -421,19 +570,193 @@ class Store:
     def list_accounts(self, limit: int = 200) -> list[dict]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT * FROM accounts ORDER BY id DESC LIMIT ?", (max(1, min(limit, 500)),)
+                self._account_query() + " ORDER BY a.id DESC LIMIT ?",
+                (max(1, min(limit, 500)),),
             ).fetchall()
         return [account.public() for row in rows if (account := self._account(row)) is not None]
 
     def promote_admin(self, identity: str) -> Account | None:
         with self._lock, self.connect() as db:
             row = db.execute(
-                "SELECT * FROM accounts WHERE email=? COLLATE NOCASE OR username=? COLLATE NOCASE",
-                (identity, identity),
+                self._account_query()
+                + """ WHERE a.username=? COLLATE NOCASE
+                       OR CAST(a.uid AS TEXT)=?
+                       OR e.email=? COLLATE NOCASE""",
+                (identity, identity, identity),
             ).fetchone()
             if row is None:
                 return None
             db.execute("UPDATE accounts SET role='admin' WHERE id=?", (int(row["id"]),))
-            return self._account(db.execute("SELECT * FROM accounts WHERE id=?", (int(row["id"]),)).fetchone())
+            return self._account(
+                db.execute(self._account_query() + " WHERE a.id=?", (int(row["id"]),)).fetchone()
+            )
+
+    def update_profile(self, account_id: int, username: str, nickname: str) -> Account:
+        with self._lock, self.connect() as db:
+            try:
+                db.execute(
+                    "UPDATE accounts SET username=?,nickname=? WHERE id=?",
+                    (username, nickname, account_id),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ValueError("该用户名已经被使用") from error
+            account = self._account(
+                db.execute(self._account_query() + " WHERE a.id=?", (account_id,)).fetchone()
+            )
+            if account is None:
+                raise ValueError("账号不存在")
+            return account
+
+    def create_external_state(self, provider: str, continue_to: str) -> tuple[str, str]:
+        raw = random_token(32)
+        verifier = random_token(48)
+        now = utc_now()
+        with self._lock, self.connect() as db:
+            db.execute("DELETE FROM external_oauth_states WHERE expires_at<?", (iso(now),))
+            db.execute(
+                """INSERT INTO external_oauth_states
+                   (state_hash,provider,code_verifier,continue_to,created_at,expires_at)
+                   VALUES(?,?,?,?,?,?)""",
+                (
+                    token_hash(raw), provider, verifier, continue_to,
+                    iso(now), iso(now + timedelta(minutes=10)),
+                ),
+            )
+        return raw, verifier
+
+    def consume_external_state(self, raw: str) -> tuple[str, str, str] | None:
+        now = utc_now()
+        with self._lock, self.connect() as db:
+            row = db.execute(
+                """SELECT provider,code_verifier,continue_to,expires_at
+                   FROM external_oauth_states WHERE state_hash=?""",
+                (token_hash(raw),),
+            ).fetchone()
+            db.execute("DELETE FROM external_oauth_states WHERE state_hash=?", (token_hash(raw),))
+        if row is None or datetime.fromisoformat(str(row["expires_at"])) < now:
+            return None
+        return str(row["provider"]), str(row["code_verifier"]), str(row["continue_to"])
+
+    def external_account(
+        self,
+        provider: str,
+        provider_subject: str,
+        raw_profile: dict | None = None,
+        upstream_subject: str | None = None,
+    ) -> Account | None:
+        identity_provider = "czl" if provider_subject.startswith("czl:") else provider
+        with self._lock, self.connect() as db:
+            row = db.execute(
+                self._account_query()
+                + """ JOIN external_identities x ON x.account_id=a.id
+                       WHERE x.provider=? AND x.provider_subject=?""",
+                (identity_provider, provider_subject),
+            ).fetchone()
+            if row is None:
+                return None
+            db.execute(
+                """UPDATE external_identities
+                   SET last_login_at=?, upstream_subject=COALESCE(?,upstream_subject),
+                       raw_profile=COALESCE(?,raw_profile)
+                   WHERE provider=? AND provider_subject=?""",
+                (
+                    iso(utc_now()), upstream_subject,
+                    json.dumps(raw_profile, ensure_ascii=False) if raw_profile is not None else None,
+                    identity_provider, provider_subject,
+                ),
+            )
+            db.execute("UPDATE accounts SET last_login_at=? WHERE id=?", (iso(utc_now()), int(row["id"])))
+            return self._account(row)
+
+    def create_external_signup(
+        self,
+        provider: str,
+        provider_subject: str,
+        provider_nickname: str | None,
+        continue_to: str,
+        raw_profile: dict | None = None,
+        upstream_subject: str | None = None,
+    ) -> str:
+        raw = random_token(32)
+        now = utc_now()
+        with self._lock, self.connect() as db:
+            db.execute("DELETE FROM external_signups WHERE expires_at<?", (iso(now),))
+            db.execute(
+                "DELETE FROM external_signups WHERE provider=? AND provider_subject=?",
+                (provider, provider_subject),
+            )
+            db.execute(
+                """INSERT INTO external_signups
+                   (token_hash,provider,provider_subject,provider_nickname,upstream_subject,raw_profile,
+                    continue_to,created_at,expires_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    token_hash(raw), provider, provider_subject, provider_nickname, upstream_subject,
+                    json.dumps(raw_profile, ensure_ascii=False) if raw_profile is not None else None,
+                    continue_to,
+                    iso(now), iso(now + timedelta(minutes=20)),
+                ),
+            )
+        return raw
+
+    def external_signup(self, raw: str) -> dict | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM external_signups WHERE token_hash=? AND expires_at>?",
+                (token_hash(raw), iso(utc_now())),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def complete_external_signup(self, raw: str, username: str, nickname: str) -> tuple[Account, str]:
+        now = utc_now()
+        with self._lock, self.connect() as db:
+            signup = db.execute(
+                "SELECT * FROM external_signups WHERE token_hash=? AND expires_at>?",
+                (token_hash(raw), iso(now)),
+            ).fetchone()
+            if signup is None:
+                raise ValueError("第三方注册会话无效或已过期")
+
+            identity_provider = "czl" if str(signup["provider_subject"]).startswith("czl:") else str(signup["provider"])
+            existing = db.execute(
+                "SELECT account_id FROM external_identities WHERE provider=? AND provider_subject=?",
+                (identity_provider, signup["provider_subject"]),
+            ).fetchone()
+            if existing is not None:
+                db.execute("DELETE FROM external_signups WHERE token_hash=?", (token_hash(raw),))
+                account = self._account(
+                    db.execute(self._account_query() + " WHERE a.id=?", (int(existing["account_id"]),)).fetchone()
+                )
+                if account is None:
+                    raise ValueError("第三方账号绑定异常")
+                return account, str(signup["continue_to"])
+
+            uid = self._next_uid(db)
+            try:
+                cur = db.execute(
+                    """INSERT INTO accounts(subject,uid,username,nickname,game_name,password_hash,created_at)
+                       VALUES(?,?,?,?,?,NULL,?)""",
+                    (str(uuid.uuid4()), uid, username, nickname, username, iso(now)),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ValueError("该用户名已经被使用") from error
+            account_id = int(cur.lastrowid)
+            db.execute(
+                """INSERT INTO external_identities
+                   (account_id,provider,provider_subject,provider_nickname,upstream_subject,raw_profile,
+                    created_at,last_login_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    account_id, identity_provider, signup["provider_subject"], signup["provider_nickname"],
+                    signup["upstream_subject"], signup["raw_profile"], iso(now), iso(now),
+                ),
+            )
+            db.execute("DELETE FROM external_signups WHERE token_hash=?", (token_hash(raw),))
+            account = self._account(
+                db.execute(self._account_query() + " WHERE a.id=?", (account_id,)).fetchone()
+            )
+            if account is None:
+                raise ValueError("账号创建失败")
+            return account, str(signup["continue_to"])
 
 

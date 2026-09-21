@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
 from .config import ROOT, settings
+from .external_oauth import ExternalOAuthError, authorize_url as external_authorize_url, exchange_profile, provider_status
 from .security import OidcSigner, utc_now
 from .store import Account, OAuthClient, Store
 
@@ -76,12 +77,24 @@ async def security_headers(request: Request, call_next):
 class RegisterRequest(BaseModel):
     email: EmailStr
     username: str = Field(min_length=3, max_length=16)
+    nickname: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=10, max_length=128)
 
 
 class LoginRequest(BaseModel):
     identity: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=128)
+
+
+class ProfileRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=16)
+    nickname: str = Field(min_length=1, max_length=64)
+
+
+class ExternalCompleteRequest(BaseModel):
+    ticket: str = Field(min_length=16, max_length=256)
+    username: str = Field(min_length=3, max_length=16)
+    nickname: str = Field(min_length=1, max_length=64)
 
 
 def current_web_account(request: Request) -> Account | None:
@@ -106,7 +119,7 @@ def append_query(url: str, **values: str | None) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
-def send_verification_email(email: str, username: str, verify_url: str) -> None:
+def send_verification_email(email: str, nickname: str, verify_url: str) -> None:
     if not settings.smtp_host:
         return
     message = EmailMessage()
@@ -114,7 +127,7 @@ def send_verification_email(email: str, username: str, verify_url: str) -> None:
     message["From"] = settings.smtp_from
     message["To"] = email
     message.set_content(
-        f"你好 {username}，\n\n请打开下面的链接验证你的 Muxi Account：\n{verify_url}\n\n链接 24 小时内有效。"
+        f"你好 {nickname}，\n\n请打开下面的链接验证你的 Muxi Account：\n{verify_url}\n\n链接 24 小时内有效。"
     )
     smtp_cls = smtplib.SMTP_SSL if settings.smtp_ssl else smtplib.SMTP
     with smtp_cls(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
@@ -145,6 +158,11 @@ def account_page() -> FileResponse:
     return FileResponse(WEB_ROOT / "account.html")
 
 
+@app.get("/external/complete", include_in_schema=False)
+def external_complete_page() -> FileResponse:
+    return FileResponse(WEB_ROOT / "external-complete.html")
+
+
 @app.post("/api/account/register", status_code=201)
 def register(
     payload: RegisterRequest,
@@ -153,12 +171,15 @@ def register(
     continue_to: str = "",
 ) -> dict:
     username = payload.username.strip()
+    nickname = payload.nickname.strip()
     if not re.fullmatch(r"[A-Za-z0-9_]{3,16}", username):
         raise HTTPException(status_code=422, detail="用户名只能使用 3–16 位字母、数字和下划线")
+    if not nickname:
+        raise HTTPException(status_code=422, detail="昵称不能为空")
     if not settings.smtp_host and not settings.dev_verify:
         raise HTTPException(status_code=503, detail="邮件验证服务尚未启用")
     try:
-        account, raw_verify = store.register(str(payload.email), username, payload.password)
+        account, raw_verify = store.register(str(payload.email), username, nickname, payload.password)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     safe_next = safe_continue(continue_to) if continue_to else "/account"
@@ -166,7 +187,7 @@ def register(
         f"{settings.issuer}/api/account/verify?token={quote(raw_verify)}"
         f"&continue_to={quote(safe_next, safe='')}"
     )
-    background.add_task(send_verification_email, account.email, account.username, verify_url)
+    background.add_task(send_verification_email, account.email, account.nickname, verify_url)
     result = {"ok": True, "message": "验证邮件已发送，请在 24 小时内完成验证"}
     if settings.dev_verify:
         result["verificationUrl"] = verify_url
@@ -212,11 +233,131 @@ def me(request: Request) -> dict:
     return {"user": account.public()}
 
 
+@app.patch("/api/account/profile")
+def update_profile(payload: ProfileRequest, request: Request) -> dict:
+    account = current_web_account(request)
+    if account is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    username = payload.username.strip()
+    nickname = payload.nickname.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_]{3,16}", username):
+        raise HTTPException(status_code=422, detail="用户名只能使用 3–16 位字母、数字和下划线")
+    if not nickname:
+        raise HTTPException(status_code=422, detail="昵称不能为空")
+    try:
+        updated = store.update_profile(account.id, username, nickname)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"user": updated.public()}
+
+
 @app.post("/api/account/logout")
 def logout(request: Request, response: Response) -> dict:
     store.delete_web_session(request.cookies.get("muxi_session"))
     response.delete_cookie("muxi_session", path="/")
     return {"ok": True}
+
+
+def set_web_session(response: Response, account: Account) -> None:
+    raw = store.create_web_session(account.id, settings.web_session_days)
+    response.set_cookie(
+        "muxi_session",
+        raw,
+        max_age=settings.web_session_days * 86400,
+        httponly=True,
+        secure=settings.secure_cookies,
+        samesite="lax",
+        path="/",
+    )
+
+
+@app.get("/api/external/providers")
+def external_providers() -> dict:
+    return {"providers": provider_status()}
+
+
+@app.get("/external/{provider}/start")
+def external_start(provider: str, continue_to: str = "/account") -> RedirectResponse:
+    if provider not in {"qq", "wechat"}:
+        raise HTTPException(status_code=404, detail="不支持的第三方登录方式")
+    safe_next = safe_continue(continue_to)
+    state, verifier = store.create_external_state(provider, safe_next)
+    try:
+        destination = external_authorize_url(provider, state, verifier)
+    except ExternalOAuthError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return RedirectResponse(destination, status_code=303)
+
+
+@app.get("/external/czl/callback")
+def external_czl_callback(
+    state: str = "",
+    code: str = "",
+    error: str = "",
+) -> RedirectResponse:
+    consumed = store.consume_external_state(state) if state else None
+    if consumed is None:
+        return RedirectResponse("/login?external=invalid_state", status_code=303)
+    provider, verifier, continue_to = consumed
+    if error or not code:
+        return RedirectResponse(
+            f"/login?external={quote(error or 'cancelled', safe='')}&continue={quote(continue_to, safe='')}",
+            status_code=303,
+        )
+    try:
+        profile = exchange_profile(provider, code, verifier)
+    except ExternalOAuthError:
+        return RedirectResponse(
+            f"/login?external=failed&continue={quote(continue_to, safe='')}", status_code=303
+        )
+
+    account = store.external_account(
+        provider,
+        profile.subject,
+        raw_profile=profile.raw_profile,
+        upstream_subject=profile.upstream_subject,
+    )
+    if account is not None:
+        response = RedirectResponse(continue_to, status_code=303)
+        set_web_session(response, account)
+        return response
+
+    ticket = store.create_external_signup(
+        provider,
+        profile.subject,
+        profile.nickname,
+        continue_to,
+        raw_profile=profile.raw_profile,
+        upstream_subject=profile.upstream_subject,
+    )
+    return RedirectResponse(f"/external/complete?ticket={quote(ticket, safe='')}", status_code=303)
+
+
+@app.get("/api/external/signup")
+def external_signup(ticket: str) -> dict:
+    signup = store.external_signup(ticket)
+    if signup is None:
+        raise HTTPException(status_code=404, detail="第三方注册会话无效或已过期")
+    return {
+        "provider": signup["provider"],
+        "nickname": signup.get("provider_nickname") or "",
+    }
+
+
+@app.post("/api/external/complete")
+def external_complete(payload: ExternalCompleteRequest, response: Response) -> dict:
+    username = payload.username.strip()
+    nickname = payload.nickname.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_]{3,16}", username):
+        raise HTTPException(status_code=422, detail="用户名只能使用 3–16 位字母、数字和下划线")
+    if not nickname:
+        raise HTTPException(status_code=422, detail="昵称不能为空")
+    try:
+        account, continue_to = store.complete_external_signup(payload.ticket, username, nickname)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    set_web_session(response, account)
+    return {"user": account.public(), "continue": safe_continue(continue_to)}
 
 
 def validate_authorization_request(
@@ -301,15 +442,11 @@ def id_token_for(account: Account, client_id: str, nonce: str | None) -> str:
     now = utc_now()
     claims = {
         "iss": settings.issuer,
-        "sub": account.subject,
         "aud": client_id,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=10)).timestamp()),
-        "email": account.email,
-        "email_verified": account.verified,
-        "preferred_username": account.username,
-        "role": account.role,
     }
+    claims.update(account.claims())
     if nonce:
         claims["nonce"] = nonce
     return signer.id_token(claims)
@@ -386,14 +523,18 @@ def userinfo(request: Request):
     allowed = set(scope.split())
     if "profile" in allowed:
         claims.update({
+            "muxi_uid": account.uid,
             "preferred_username": account.username,
             "username": account.username,
+            "name": account.nickname,
+            "nickname": account.nickname,
+            "game_name": account.game_name,
             "role": account.role,
             "created_at": account.created_at,
             "last_login_at": account.last_login_at,
         })
-    if "email" in allowed:
-        claims.update({"email": account.email, "email_verified": account.verified})
+    if "email" in allowed and account.email:
+        claims.update({"email": account.email, "email_verified": account.email_verified})
     return claims
 
 
@@ -425,8 +566,8 @@ def metadata() -> dict:
         "id_token_signing_alg_values_supported": ["RS256"],
         "scopes_supported": ["openid", "profile", "email"],
         "claims_supported": [
-            "sub", "iss", "aud", "exp", "iat", "preferred_username", "email", "email_verified", "role",
-            "created_at", "last_login_at"
+            "sub", "iss", "aud", "exp", "iat", "muxi_uid", "preferred_username", "username",
+            "name", "nickname", "game_name", "email", "email_verified", "role", "created_at", "last_login_at"
         ],
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none", "client_secret_basic", "client_secret_post"],

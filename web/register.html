@@ -24,13 +24,18 @@
 
       <form id="register-form" class="identity-form">
         <label class="identity-field">
-          <span>邮箱</span>
-          <input name="email" type="email" autocomplete="email" autofocus required>
+          <span>昵称</span>
+          <input name="nickname" maxlength="64" autocomplete="nickname" autofocus required>
+          <small>用于平台展示，可以和其他人重复，也可以以后修改。</small>
         </label>
         <label class="identity-field">
           <span>用户名</span>
           <input name="username" minlength="3" maxlength="16" pattern="[A-Za-z0-9_]+" autocomplete="username" required>
-          <small>3–16 位字母、数字或下划线。当前也会作为 Better MC 游戏名。</small>
+          <small>唯一，可用于登录；以后可以修改。首次用户名会作为稳定 Minecraft 游戏名。</small>
+        </label>
+        <label class="identity-field">
+          <span>邮箱</span>
+          <input name="email" type="email" autocomplete="email" required>
         </label>
         <label class="identity-field">
           <span>密码</span>
@@ -44,6 +49,12 @@
           <button type="submit" class="identity-primary">创建账户</button>
         </div>
       </form>
+
+      <div class="identity-divider"><span>或使用第三方账户</span></div>
+      <div class="identity-social">
+        <a class="identity-social-button" data-provider="qq" href="#" aria-disabled="true">使用 QQ 注册</a>
+        <a class="identity-social-button" data-provider="wechat" href="#" aria-disabled="true">使用微信注册</a>
+      </div>
     </section>
   </main>
 

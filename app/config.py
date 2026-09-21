@@ -64,9 +64,27 @@ class Settings:
     smtp_password: str = os.getenv("MUXI_SMTP_PASSWORD", "")
     smtp_from: str = os.getenv("MUXI_SMTP_FROM", "Muxi Account <no-reply@muxigame.com>")
 
+    # CZL Connect is an upstream identity broker. Keep compatibility with the
+    # Client_ID / Client_Secret names already present in the local .env.
+    czl_client_id: str = os.getenv("MUXI_CZL_CLIENT_ID") or os.getenv("Client_ID", "")
+    czl_client_secret: str = os.getenv("MUXI_CZL_CLIENT_SECRET") or os.getenv("Client_Secret", "")
+    czl_authorize_endpoint: str = os.getenv(
+        "MUXI_CZL_AUTHORIZE_ENDPOINT", "https://connect.czl.net/oauth2/authorize"
+    )
+    czl_token_endpoint: str = os.getenv(
+        "MUXI_CZL_TOKEN_ENDPOINT", "https://connect.czl.net/api/oauth2/token"
+    )
+    czl_userinfo_endpoint: str = os.getenv(
+        "MUXI_CZL_USERINFO_ENDPOINT", "https://connect.czl.net/api/oauth2/userinfo"
+    )
+
     @property
     def secure_cookies(self) -> bool:
         return self.issuer.lower().startswith("https://")
+
+    @property
+    def czl_redirect_uri(self) -> str:
+        return f"{self.issuer}/external/czl/callback"
 
 
 settings = Settings()

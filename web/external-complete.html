@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>完成账户 · Muxi Account</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/identity.css">
+</head>
+<body class="identity-body">
+  <main class="identity-stage">
+    <section class="identity-card" aria-labelledby="page-title">
+      <a class="identity-brand" href="/" aria-label="Muxi Account">
+        <span class="identity-mark" aria-hidden="true">M</span><span>Muxi</span>
+      </a>
+      <p class="identity-context" id="external-provider">第三方账户</p>
+      <h1 id="page-title">完成 Muxi Account</h1>
+      <p class="identity-subtitle">首次使用第三方账户登录，需要设置你的 Muxi 昵称和唯一用户名。</p>
+      <div id="message" class="identity-message" hidden></div>
+      <form id="external-complete-form" class="identity-form">
+        <label class="identity-field">
+          <span>昵称</span>
+          <input id="external-nickname" name="nickname" maxlength="64" autocomplete="nickname" required>
+          <small>仅用于展示，可以重复并随时修改。</small>
+        </label>
+        <label class="identity-field">
+          <span>用户名</span>
+          <input name="username" minlength="3" maxlength="16" pattern="[A-Za-z0-9_]+" autocomplete="username" required>
+          <small>唯一，可用于登录。首次用户名同时成为稳定 Minecraft 游戏名。</small>
+        </label>
+        <div class="identity-actions"><button type="submit" class="identity-primary">完成创建</button></div>
+      </form>
+    </section>
+  </main>
+  <footer class="identity-footer"><span>Muxi Account</span><span>统一身份服务</span></footer>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
