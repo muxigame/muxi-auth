@@ -27,6 +27,11 @@ mkdir -p "$stage" "$incoming"
 install -d -m 0750 -o 10001 -g 10001 "$project_dir/data"
 tar -xzf "$archive" -C "$stage"
 
+# Validate the actual runtime environment before replacing the working release.
+# Optional GitHub Secrets override the persistent .env only as a complete pair.
+python3 "$stage/scripts/deploy_config.py" \
+  --project-dir "$project_dir" --compose "$stage/compose.prod.yaml"
+
 # Keep only persistent runtime state in the project root.
 find "$project_dir" -mindepth 1 -maxdepth 1 \
   ! -name '.env' ! -name 'data' ! -name 'incoming' ! -name '.stage' \
@@ -128,5 +133,6 @@ NGINX_HTTPS
 nginx -t
 nginx -s reload
 curl --fail --silent https://account.muxigame.com/healthz >/dev/null
-echo "muxi-auth deployment is healthy and HTTPS is ready"
+python3 "$project_dir/scripts/check_external_auth.py"
+echo "muxi-auth deployment is healthy; HTTPS and CZL login entry points are ready"
 docker image prune -f >/dev/null 2>&1 || true

@@ -272,7 +272,8 @@ def set_web_session(response: Response, account: Account) -> None:
 
 
 @app.get("/api/external/providers")
-def external_providers() -> dict:
+def external_providers(response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
     return {"providers": provider_status()}
 
 
