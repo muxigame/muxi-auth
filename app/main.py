@@ -146,7 +146,12 @@ def account_page() -> FileResponse:
 
 
 @app.post("/api/account/register", status_code=201)
-def register(payload: RegisterRequest, request: Request, background: BackgroundTasks) -> dict:
+def register(
+    payload: RegisterRequest,
+    request: Request,
+    background: BackgroundTasks,
+    continue_to: str = "",
+) -> dict:
     username = payload.username.strip()
     if not re.fullmatch(r"[A-Za-z0-9_]{3,16}", username):
         raise HTTPException(status_code=422, detail="用户名只能使用 3–16 位字母、数字和下划线")
@@ -156,7 +161,11 @@ def register(payload: RegisterRequest, request: Request, background: BackgroundT
         account, raw_verify = store.register(str(payload.email), username, payload.password)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    verify_url = f"{settings.issuer}/api/account/verify?token={quote(raw_verify)}"
+    safe_next = safe_continue(continue_to) if continue_to else "/account"
+    verify_url = (
+        f"{settings.issuer}/api/account/verify?token={quote(raw_verify)}"
+        f"&continue_to={quote(safe_next, safe='')}"
+    )
     background.add_task(send_verification_email, account.email, account.username, verify_url)
     result = {"ok": True, "message": "验证邮件已发送，请在 24 小时内完成验证"}
     if settings.dev_verify:
@@ -165,9 +174,13 @@ def register(payload: RegisterRequest, request: Request, background: BackgroundT
 
 
 @app.get("/api/account/verify")
-def verify_email(token: str = "") -> RedirectResponse:
+def verify_email(token: str = "", continue_to: str = "") -> RedirectResponse:
     ok = bool(token) and store.verify_email(token) is not None
-    return RedirectResponse(f"/login?verified={'1' if ok else '0'}", status_code=303)
+    safe_next = safe_continue(continue_to) if continue_to else "/account"
+    return RedirectResponse(
+        f"/login?verified={'1' if ok else '0'}&continue={quote(safe_next, safe='')}",
+        status_code=303,
+    )
 
 
 @app.post("/api/account/login")

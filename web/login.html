@@ -1,2 +1,50 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录 · Muxi Account</title><link rel="stylesheet" href="/static/style.css"></head><body><header class="nav"><a class="brand" href="/">MUXI <span>// ACCOUNT</span></a><nav class="navlinks"><a href="/register">创建账号</a></nav></header><main class="shell"><section class="hero"><div class="eyebrow">SIGN IN</div><h1>欢迎回来。</h1><p>登录后，授权中的 Muxi 应用会继续完成登录；你的密码不会交给启动器或其他应用。</p></section><section class="card"><h2>登录</h2><p>使用邮箱或用户名。</p><div id="message" class="message" hidden></div><form id="login-form" class="form"><label class="field"><span>邮箱或用户名</span><input name="identity" autocomplete="username" required></label><label class="field"><span>密码</span><input name="password" type="password" autocomplete="current-password" required></label><button type="submit">继续</button><div class="hint">还没有账户？<a href="/register">创建 Muxi Account</a></div></form></section></main><script src="/static/app.js" defer></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>登录 · Muxi Account</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/identity.css">
+</head>
+<body class="identity-body">
+  <main class="identity-stage">
+    <section class="identity-card" aria-labelledby="page-title">
+      <a class="identity-brand" href="/" aria-label="Muxi Account">
+        <span class="identity-mark" aria-hidden="true">M</span>
+        <span>Muxi</span>
+      </a>
 
+      <p class="identity-context" id="auth-context" hidden></p>
+      <h1 id="page-title">登录</h1>
+      <p class="identity-subtitle">使用你的 Muxi Account 继续。</p>
+
+      <div id="message" class="identity-message" hidden></div>
+
+      <form id="login-form" class="identity-form">
+        <label class="identity-field">
+          <span>邮箱或用户名</span>
+          <input name="identity" autocomplete="username" autofocus required>
+        </label>
+        <label class="identity-field">
+          <span>密码</span>
+          <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <div class="identity-inline-help">
+          还没有账户？<a href="/register" data-preserve-continue>创建一个</a>
+        </div>
+        <div class="identity-actions">
+          <button type="submit" class="identity-primary">登录</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <footer class="identity-footer">
+    <span>Muxi Account</span>
+    <span>OAuth 2.0 · OpenID Connect</span>
+  </footer>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

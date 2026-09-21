@@ -1,2 +1,56 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>注册 · Muxi Account</title><link rel="stylesheet" href="/static/style.css"></head><body><header class="nav"><a class="brand" href="/">MUXI <span>// ACCOUNT</span></a><nav class="navlinks"><a href="/login">登录</a></nav></header><main class="shell"><section class="hero"><div class="eyebrow">CREATE ACCOUNT</div><h1>建立你的<br>Muxi 身份。</h1><p>用户名目前也会作为 Better MC 的离线游戏名使用，因此保持 3–16 位字母、数字或下划线。</p></section><section class="card"><h2>创建账号</h2><p>注册后需要完成邮箱验证。</p><div id="message" class="message" hidden></div><form id="register-form" class="form"><label class="field"><span>邮箱</span><input name="email" type="email" autocomplete="email" required></label><label class="field"><span>用户名</span><input name="username" minlength="3" maxlength="16" pattern="[A-Za-z0-9_]+" autocomplete="username" required></label><label class="field"><span>密码</span><input name="password" type="password" minlength="10" autocomplete="new-password" required></label><button type="submit">创建 Muxi Account</button></form></section></main><script src="/static/app.js" defer></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>创建账户 · Muxi Account</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/identity.css">
+</head>
+<body class="identity-body">
+  <main class="identity-stage">
+    <section class="identity-card" aria-labelledby="page-title">
+      <a class="identity-brand" href="/" aria-label="Muxi Account">
+        <span class="identity-mark" aria-hidden="true">M</span>
+        <span>Muxi</span>
+      </a>
 
+      <p class="identity-context" id="auth-context" hidden></p>
+      <h1 id="page-title">创建账户</h1>
+      <p class="identity-subtitle">这个账户将用于 MuxiGame 的网站与客户端。</p>
+
+      <div id="message" class="identity-message" hidden></div>
+
+      <form id="register-form" class="identity-form">
+        <label class="identity-field">
+          <span>邮箱</span>
+          <input name="email" type="email" autocomplete="email" autofocus required>
+        </label>
+        <label class="identity-field">
+          <span>用户名</span>
+          <input name="username" minlength="3" maxlength="16" pattern="[A-Za-z0-9_]+" autocomplete="username" required>
+          <small>3–16 位字母、数字或下划线。当前也会作为 Better MC 游戏名。</small>
+        </label>
+        <label class="identity-field">
+          <span>密码</span>
+          <input name="password" type="password" minlength="10" autocomplete="new-password" required>
+          <small>至少 10 位。</small>
+        </label>
+        <div class="identity-inline-help">
+          已经有账户？<a href="/login" data-preserve-continue>登录</a>
+        </div>
+        <div class="identity-actions">
+          <button type="submit" class="identity-primary">创建账户</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <footer class="identity-footer">
+    <span>Muxi Account</span>
+    <span>统一身份服务</span>
+  </footer>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

@@ -70,25 +70,5 @@ class StoreTests(unittest.TestCase):
         self.assertIsNotNone(first)
         self.assertIsNone(self.store.consume_refresh_token(refresh, "native"))
 
-    def test_import_preserves_password_hash(self):
-        source, verify = self.store.register("legacy@example.com", "Legacy_1", "correct-horse-battery")
-        self.store.verify_email(verify)
-        with self.store.connect() as db:
-            row = db.execute("SELECT password_hash FROM accounts WHERE id=?", (source.id,)).fetchone()
-            password_hash = row["password_hash"]
-
-        other = Store(Path(self.tmp.name) / "import.db")
-        imported, created = other.import_account(
-            email="legacy@example.com",
-            username="Legacy_1",
-            password_hash=password_hash,
-            role="admin",
-            verified=True,
-        )
-        self.assertTrue(created)
-        self.assertEqual("admin", imported.role)
-        self.assertEqual(imported.subject, other.authenticate("Legacy_1", "correct-horse-battery").subject)
-
-
 if __name__ == "__main__":
     unittest.main()

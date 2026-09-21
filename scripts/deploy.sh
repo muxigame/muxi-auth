@@ -37,21 +37,6 @@ rm -rf "$stage"
 cd "$project_dir"
 docker compose -f compose.prod.yaml build muxi-auth
 
-# One-time migration from the account database that used to live inside Better MC.
-legacy="$incoming/battermc-legacy.db"
-migration_marker="$project_dir/data/.legacy-battermc-imported"
-if [[ ! -f "$migration_marker" ]]; then
-  if docker inspect better-mc-remake-server >/dev/null 2>&1; then
-    docker cp better-mc-remake-server:/app/server/data/battermc.db "$legacy" 2>/dev/null || true
-  fi
-  if [[ -f "$legacy" ]]; then
-    docker compose -f compose.prod.yaml run --rm \
-      -v "$legacy:/legacy/battermc.db:ro" \
-      muxi-auth python scripts/import_battermc.py /legacy/battermc.db
-    touch "$migration_marker"
-  fi
-fi
-
 docker compose -f compose.prod.yaml up -d --remove-orphans
 
 for _ in $(seq 1 45); do

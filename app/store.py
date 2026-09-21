@@ -436,35 +436,4 @@ class Store:
             db.execute("UPDATE accounts SET role='admin' WHERE id=?", (int(row["id"]),))
             return self._account(db.execute("SELECT * FROM accounts WHERE id=?", (int(row["id"]),)).fetchone())
 
-    def import_account(
-        self,
-        *,
-        email: str,
-        username: str,
-        password_hash: str,
-        role: str = "player",
-        verified: bool = True,
-        created_at: str | None = None,
-        last_login_at: str | None = None,
-    ) -> tuple[Account, bool]:
-        """Import a legacy account without ever handling its plaintext password."""
-        with self._lock, self.connect() as db:
-            existing = db.execute(
-                "SELECT * FROM accounts WHERE email=? COLLATE NOCASE OR username=? COLLATE NOCASE",
-                (email, username),
-            ).fetchone()
-            if existing is not None:
-                return self._account(existing), False  # type: ignore[return-value]
-            now = created_at or iso(utc_now())
-            cur = db.execute(
-                """INSERT INTO accounts(subject,email,username,password_hash,role,verified,created_at,last_login_at)
-                   VALUES(?,?,?,?,?,?,?,?)""",
-                (
-                    str(uuid.uuid4()), email.lower(), username, password_hash,
-                    role if role in {"player", "admin"} else "player",
-                    1 if verified else 0, now, last_login_at,
-                ),
-            )
-            account = self._account(db.execute("SELECT * FROM accounts WHERE id=?", (int(cur.lastrowid),)).fetchone())
-            return account, True  # type: ignore[return-value]
 
