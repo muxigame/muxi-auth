@@ -21,7 +21,10 @@ if [[ ! -f "$project_dir/.env" ]]; then
 fi
 
 rm -rf "$stage"
-mkdir -p "$stage" "$project_dir/data" "$incoming"
+mkdir -p "$stage" "$incoming"
+# `data` is a bind mount. The image runs as uid/gid 10001, so a root-owned
+# host directory would make SQLite fail with "unable to open database file".
+install -d -m 0750 -o 10001 -g 10001 "$project_dir/data"
 tar -xzf "$archive" -C "$stage"
 
 # Keep only persistent runtime state in the project root.
