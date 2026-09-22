@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,7 +36,7 @@ def pkce_s256(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
-def authorize_url(provider: str, state: str, code_verifier: str) -> str:
+def authorize_url(provider: str, state: str, code_verifier: str, *, user_agent: str = "") -> str:
     if provider not in {"qq", "wechat"}:
         raise ExternalOAuthError("不支持的第三方登录方式")
     if not provider_status()[provider]:
@@ -53,7 +54,34 @@ def authorize_url(provider: str, state: str, code_verifier: str) -> str:
             "upstream_providers": provider,
         }
     )
-    return f"{settings.czl_authorize_endpoint}?{params}"
+    authorization = f"{settings.czl_authorize_endpoint}?{params}"
+    if not settings.czl_direct_upstream:
+        return authorization
+
+    # This is the same navigation used by CZL's own QQ/WeChat login buttons.
+    # The browser visits CZL (which sets its own state/session cookies), then
+    # CZL redirects to Tencent. Do NOT fetch the Tencent URL server-side and
+    # relay it: that would leave CZL's browser cookies behind.
+    # After upstream login, resume the entire original OAuth request, never
+    # send the upstream code directly to muxi or bypass application consent.
+    endpoint = urllib.parse.urlsplit(settings.czl_authorize_endpoint)
+    if (endpoint.scheme, endpoint.netloc, endpoint.path) != (
+        "https", "connect.czl.net", "/oauth2/authorize"
+    ) or endpoint.query or endpoint.fragment:
+        raise ExternalOAuthError("CZL 直达登录需要使用官方 OAuth2 授权端点")
+    direct_params = {"redirect": authorization}
+    if provider == "wechat":
+        # Match device routing used by CZL's own login page.
+        mobile = re.search(
+            r"Mobile|Android|iPhone|iPad|iPod|BlackBerry|Windows Phone|Opera Mini|IEMobile|Xiaomi|Huawei|Vivo|Oppo",
+            user_agent,
+            re.IGNORECASE,
+        )
+        direct_params["device"] = "mobile" if mobile else "pc"
+    return (
+        f"https://connect.czl.net/api/auth/upstream/{provider}?"
+        + urllib.parse.urlencode(direct_params)
+    )
 
 
 def _json_request(request: urllib.request.Request, *, timeout: int = 15) -> dict[str, Any]:

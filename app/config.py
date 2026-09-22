@@ -77,6 +77,9 @@ class Settings:
     czl_userinfo_endpoint: str = os.getenv(
         "MUXI_CZL_USERINFO_ENDPOINT", "https://connect.czl.net/api/oauth2/userinfo"
     )
+    # Use CZL's own provider-button endpoint to skip its provider selection UI.
+    # Set to 0 to fall back to the documented OAuth authorization entry.
+    czl_direct_upstream: bool = os.getenv("MUXI_CZL_DIRECT_UPSTREAM", "1").strip() == "1"
 
     @property
     def secure_cookies(self) -> bool:

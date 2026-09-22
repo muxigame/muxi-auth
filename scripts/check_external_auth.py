@@ -16,6 +16,18 @@ class NoRedirect(HTTPRedirectHandler):
 def check_redirect(provider: str, status: int, location: str, issuer: str) -> None:
     url = urlsplit(location)
     query = parse_qs(url.query)
+    sensitive = {"client_secret", "code_verifier", "access_token", "refresh_token", "id_token"}
+    if status != 303 or (url.scheme, url.netloc) != ("https", "connect.czl.net"):
+        raise ValueError("Third-party login did not redirect to CZL")
+    if sensitive.intersection(query):
+        raise ValueError("A credential must never appear in the authorization URL")
+    if url.path.startswith("/api/auth/upstream/"):
+        if url.path != f"/api/auth/upstream/{provider}" or len(query.get("redirect", [])) != 1:
+            raise ValueError("CZL direct provider entry or continuation is incorrect")
+        if provider == "wechat" and query.get("device") not in (["pc"], ["mobile"]):
+            raise ValueError("CZL WeChat device routing is incorrect")
+        url = urlsplit(query["redirect"][0])
+        query = parse_qs(url.query)
     expected = {
         "response_type": ["code"],
         "redirect_uri": [issuer.rstrip("/") + "/external/czl/callback"],
@@ -30,7 +42,7 @@ def check_redirect(provider: str, status: int, location: str, issuer: str) -> No
         raise ValueError("CZL callback, provider selection or PKCE is incorrect")
     if not all(query.get(key, [""])[0] for key in ("state", "code_challenge", "client_id")):
         raise ValueError("CZL authorization is missing required parameters")
-    if "client_secret" in query:
+    if sensitive.intersection(query):
         raise ValueError("A credential must never appear in the authorization URL")
 
 

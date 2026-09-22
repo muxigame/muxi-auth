@@ -315,16 +315,18 @@ def complete_launcher_auth_flow(flow: str, secret: str = "") -> Response:
 
 
 @app.get("/external/{provider}/start")
-def external_start(provider: str, continue_to: str = "/account") -> RedirectResponse:
+def external_start(provider: str, request: Request, continue_to: str = "/account") -> RedirectResponse:
     if provider not in {"qq", "wechat"}:
         raise HTTPException(status_code=404, detail="不支持的第三方登录方式")
     safe_next = safe_continue(continue_to)
     state, verifier = store.create_external_state(provider, safe_next)
     try:
-        destination = external_authorize_url(provider, state, verifier)
+        destination = external_authorize_url(
+            provider, state, verifier, user_agent=request.headers.get("user-agent", "")
+        )
     except ExternalOAuthError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
-    return RedirectResponse(destination, status_code=303)
+    return RedirectResponse(destination, status_code=303, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/external/czl/callback")
