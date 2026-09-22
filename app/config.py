@@ -38,6 +38,8 @@ def path_env(name: str, default: str) -> Path:
 
 @dataclass(frozen=True)
 class Settings:
+    # Server-to-server nickname lookup only; never ship this key to launchers.
+    minecraft_profile_key: str = os.getenv("MUXI_MC_PROFILE_KEY", "")
     issuer: str = os.getenv("MUXI_ISSUER", "http://127.0.0.1:9000").rstrip("/")
     database_path: Path = path_env("MUXI_DATABASE_PATH", "data/muxi-auth.db")
     signing_key_path: Path = path_env("MUXI_SIGNING_KEY_PATH", "data/oidc-signing.pem")

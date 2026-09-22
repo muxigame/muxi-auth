@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hmac
 import json
 import re
 import smtplib
@@ -17,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
 from .config import ROOT, settings
+from .minecraft_identity import game_identity
 from .external_oauth import ExternalOAuthError, authorize_url as external_authorize_url, exchange_profile, provider_status
 from .security import OidcSigner, utc_now
 from .store import Account, OAuthClient, Store
@@ -54,6 +56,23 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 @app.get("/healthz", include_in_schema=False)
 def healthz() -> dict:
     return {"ok": True, "service": "muxi-auth"}
+
+
+@app.get("/api/internal/minecraft/identity/{uid}", include_in_schema=False)
+def minecraft_identity(uid: int, request: Request) -> JSONResponse:
+    key = settings.minecraft_profile_key
+    supplied = request.headers.get("x-muxi-server-key", "")
+    if len(key) < 32:
+        raise HTTPException(status_code=503, detail="Game identity service is not configured")
+    if not supplied or not hmac.compare_digest(supplied.encode(), key.encode()):
+        raise HTTPException(status_code=401, detail="Invalid game server credential")
+    if not 10000 <= uid <= 9999999999999999:
+        raise HTTPException(status_code=404, detail="Player not found")
+    account = store.account_by_uid(uid)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+    # Deliberately exclude email, username, subject, roles and OAuth credentials.
+    return JSONResponse(game_identity(account.uid, account.nickname), headers={"Cache-Control": "no-store"})
 
 
 @app.middleware("http")
@@ -569,7 +588,7 @@ def userinfo(request: Request):
             "username": account.username,
             "name": account.nickname,
             "nickname": account.nickname,
-            "game_name": account.game_name,
+            "game_name": str(account.uid),
             "role": account.role,
             "created_at": account.created_at,
             "last_login_at": account.last_login_at,

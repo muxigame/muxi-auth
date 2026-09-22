@@ -41,7 +41,7 @@ class Account:
             "username": self.username,
             "name": self.nickname,
             "nickname": self.nickname,
-            "game_name": self.game_name,
+            "game_name": str(self.uid),
             "role": self.role,
         }
         if self.email:
@@ -56,7 +56,7 @@ class Account:
             "email": self.email,
             "username": self.username,
             "nickname": self.nickname,
-            "gameName": self.game_name,
+            "gameName": str(self.uid),
             "role": self.role,
             "verified": self.email_verified,
             "createdAt": self.created_at,
@@ -835,6 +835,10 @@ class Store:
                     )
                     return "cancelled"
             return status
+
+    def account_by_uid(self, uid: int) -> Account | None:
+        with self.connect() as db:
+            return self._account(db.execute(self._account_query() + " WHERE a.uid=?", (uid,)).fetchone())
 
     def complete_launcher_auth_flow(self, flow: str, secret: str) -> None:
         with self._lock, self.connect() as db:

@@ -233,7 +233,7 @@ if ($('profile-form')) {
         method: 'PATCH',
         body: JSON.stringify(form),
       });
-      showMessage('资料已保存。Minecraft 游戏名保持不变。');
+      showMessage('资料已保存。游戏登录 UID 不变，在线昵称会自动同步。');
       const user = result.user;
       $('nickname').textContent = user.nickname;
       $('username').textContent = `@${user.username}`;
