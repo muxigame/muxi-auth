@@ -168,7 +168,12 @@ if ($('login-form')) {
 if ($('register-form')) {
   $('register-form').onsubmit = async (event) => {
     event.preventDefault();
-    const form = Object.fromEntries(new FormData(event.currentTarget));
+    // 先把表单元素接出来再 await。event.currentTarget 只在事件派发期间有效，
+    // async 处理器一让出就被置成 null —— 这里原本在 await 之后直接拿它调 reset()，
+    // 抛 "Cannot read properties of null"，又被下面的 catch 当成错误显示出来。
+    // 结果是注册其实成功了、验证邮件也发了，用户看到的却是一条报错。
+    const element = event.currentTarget;
+    const form = Object.fromEntries(new FormData(element));
     try {
       const result = await api(`/api/account/register?continue_to=${continueQuery()}`, {
         method: 'POST',
@@ -183,7 +188,7 @@ if ($('register-form')) {
         a.addEventListener('click', markLauncherFlowLeaving);
         $('message').appendChild(a);
       }
-      event.currentTarget.reset();
+      element.reset();
     } catch (error) {
       showMessage(error.message, true);
     }
