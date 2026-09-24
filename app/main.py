@@ -19,6 +19,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from .config import ROOT, settings
 from .minecraft_identity import game_identity
+from . import minecraft_join as join_grants
 from .external_oauth import ExternalOAuthError, authorize_url as external_authorize_url, exchange_profile, provider_status
 from .security import OidcSigner, utc_now
 from .store import Account, OAuthClient, Store
@@ -58,8 +59,8 @@ def healthz() -> dict:
     return {"ok": True, "service": "muxi-auth"}
 
 
-@app.get("/api/internal/minecraft/identity/{uid}", include_in_schema=False)
-def minecraft_identity(uid: int, request: Request) -> JSONResponse:
+def minecraft_player(uid: int, request: Request) -> Account:
+    """Shared gate for the two game-server endpoints: server key, then the player."""
     key = settings.minecraft_profile_key
     supplied = request.headers.get("x-muxi-server-key", "")
     if len(key) < 32:
@@ -71,8 +72,41 @@ def minecraft_identity(uid: int, request: Request) -> JSONResponse:
     account = store.account_by_uid(uid)
     if account is None:
         raise HTTPException(status_code=404, detail="Player not found")
+    return account
+
+
+@app.get("/api/internal/minecraft/identity/{uid}", include_in_schema=False)
+def minecraft_identity(uid: int, request: Request) -> JSONResponse:
+    account = minecraft_player(uid, request)
     # Deliberately exclude email, username, subject, roles and OAuth credentials.
     return JSONResponse(game_identity(account.uid, account.nickname), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/internal/minecraft/join/{uid}", include_in_schema=False)
+def minecraft_join_consume(uid: int, request: Request) -> JSONResponse:
+    """游戏服务端在放人进世界之前核销票据。没票就是冒名，409。
+
+    和上面那个 identity 端点分开，是因为昵称同步每 60 秒就会跑一轮；两者合并的话
+    刷新会把在线玩家的票吃掉，玩家下次重连就进不来了。
+    """
+    account = minecraft_player(uid, request)
+    if not join_grants.consume(uid):
+        raise HTTPException(status_code=409, detail="No pending join grant for this UID")
+    return JSONResponse(game_identity(account.uid, account.nickname), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/launcher/minecraft/join", include_in_schema=False)
+def minecraft_join_mint(request: Request) -> JSONResponse:
+    """启动器在玩家发起进服连接的那一刻换票。凭据是本人的 access token。"""
+    result = store.access_token(bearer(request))
+    if result is None:
+        raise HTTPException(status_code=401, detail="登录状态已过期，请重新登录")
+    account, _client_id, _scope = result
+    seconds = join_grants.mint(account.uid)
+    return JSONResponse(
+        {"ok": True, "uid": account.uid, "loginName": str(account.uid), "expiresInSeconds": seconds},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.middleware("http")
