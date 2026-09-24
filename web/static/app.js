@@ -120,24 +120,155 @@ async function wireExternalProviders() {
   }
 }
 
+let account = null;
+
 async function loadAccount() {
   try {
     const { user } = await api('/api/account/me');
-    if ($('nickname')) $('nickname').textContent = user.nickname || user.username;
-    if ($('username')) $('username').textContent = `@${user.username}`;
-    if ($('uid')) $('uid').textContent = user.uid;
-    if ($('profile-uid')) $('profile-uid').textContent = user.uid;
-    if ($('game-name')) $('game-name').textContent = user.gameName;
-    if ($('email')) $('email').textContent = user.email || '未绑定';
-    if ($('role')) $('role').textContent = user.role;
-    if ($('created')) $('created').textContent = new Date(user.createdAt).toLocaleString('zh-CN');
-    if ($('profile-nickname')) $('profile-nickname').value = user.nickname || '';
-    if ($('profile-username')) $('profile-username').value = user.username || '';
+    account = user;
+    renderAccount(user);
     return user;
   } catch {
     if (location.pathname === '/account') location.href = '/login?continue=%2Faccount';
     return null;
   }
+}
+
+function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
+
+function renderAccount(user) {
+  setText('nickname', user.nickname || user.username);
+  setText('username', `@${user.username}`);
+  setText('uid', user.uid);
+  setText('game-name', user.gameName);
+  setText('role', user.role);
+  setText('role-tag', user.role);
+  setText('danger-uid', user.uid);
+  setText('delete-hint', user.username);
+  setText('created', new Date(user.createdAt).toLocaleString('zh-CN'));
+  if ($('profile-nickname')) $('profile-nickname').value = user.nickname || '';
+  if ($('profile-username')) $('profile-username').value = user.username || '';
+  renderAvatar(user);
+  renderEmail(user);
+}
+
+function renderAvatar(user) {
+  const img = $('avatar-img');
+  const initial = $('avatar-initial');
+  if (!img || !initial) return;
+  if (user.avatarUrl) {
+    img.src = user.avatarUrl;
+    img.hidden = false;
+    initial.hidden = true;
+  } else {
+    img.hidden = true;
+    initial.hidden = false;
+    // 没有头像就用昵称首字。用 Array.from 取，否则 emoji 和部分汉字会被从中间切断。
+    initial.textContent = Array.from(user.nickname || user.username || '?')[0].toUpperCase();
+  }
+  if ($('avatar-clear')) $('avatar-clear').hidden = !user.avatarUrl;
+}
+
+// 邮箱有三种状态，各给一套界面。原先只有一句"未绑定"，用 QQ/微信 注册的人无处可去。
+function renderEmail(user) {
+  const none = $('email-none');
+  if (!none) return;
+  const pending = !!user.email && !user.verified;
+  const verified = !!user.email && !!user.verified;
+  none.hidden = !!user.email;
+  $('email-pending').hidden = !pending;
+  $('email-verified').hidden = !verified;
+  if (pending) setText('email-pending-address', user.email);
+  if (verified) setText('email-verified-address', user.email);
+  if ($('verify-tag')) $('verify-tag').hidden = !pending;
+}
+
+function wireAvatar() {
+  const picker = $('avatar-file');
+  if (!picker) return;
+  $('avatar-pick').onclick = () => picker.click();
+  picker.onchange = async () => {
+    const file = picker.files && picker.files[0];
+    // 每次都清空：选同一个文件两次不会触发 change，用户会以为按钮坏了。
+    picker.value = '';
+    if (!file) return;
+    const body = new FormData();
+    body.append('file', file);
+    try {
+      // 这里不能带 Content-Type：交给浏览器自己填，它要在里面塞 multipart 的 boundary。
+      const response = await fetch('/api/account/avatar', { method: 'POST', body });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || '头像上传失败');
+      showMessage('头像已更新。');
+      await loadAccount();
+    } catch (error) {
+      showMessage(error.message, true);
+    }
+  };
+  $('avatar-clear').onclick = async () => {
+    try {
+      await api('/api/account/avatar', { method: 'DELETE' });
+      showMessage('头像已移除。');
+      await loadAccount();
+    } catch (error) {
+      showMessage(error.message, true);
+    }
+  };
+}
+
+function wireEmail() {
+  const form = $('email-form');
+  if (!form) return;
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const element = event.currentTarget;
+    const body = JSON.stringify(Object.fromEntries(new FormData(element)));
+    try {
+      const result = await api('/api/account/email', { method: 'POST', body });
+      showMessage(`验证邮件已发往 ${result.email}，24 小时内点击信里的链接即可完成绑定。`);
+      await loadAccount();
+    } catch (error) {
+      showMessage(error.message, true);
+    }
+  };
+  $('email-resend').onclick = async () => {
+    if (!account || !account.email) return;
+    try {
+      const result = await api('/api/account/verification/resend', {
+        method: 'POST',
+        body: JSON.stringify({ email: account.email }),
+      });
+      showMessage(result.message);
+    } catch (error) {
+      showMessage(error.message, true);
+    }
+  };
+  // 换邮箱就是回到"没绑"那一屏重填一次；服务端允许覆盖还没验证的地址。
+  $('email-change').onclick = () => {
+    $('email-pending').hidden = true;
+    $('email-none').hidden = false;
+    $('email-input').value = '';
+    $('email-input').focus();
+  };
+}
+
+function wireDeleteAccount() {
+  const open = $('delete-open');
+  if (!open) return;
+  const form = $('delete-form');
+  open.onclick = () => { open.hidden = true; form.hidden = false; $('delete-username').focus(); };
+  $('delete-cancel').onclick = () => { form.hidden = true; open.hidden = false; $('delete-username').value = ''; };
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const body = JSON.stringify(Object.fromEntries(new FormData(event.currentTarget)));
+    try {
+      await api('/api/account', { method: 'DELETE', body });
+      // 账号没了，留在这一页只会看到一串请求失败。
+      location.href = '/?deleted=1';
+    } catch (error) {
+      showMessage(error.message, true);
+    }
+  };
 }
 
 if ($('login-form')) {
@@ -165,6 +296,28 @@ if ($('login-form')) {
   wireExternalProviders();
 }
 
+// 注册成功：把表单换成"去收信"。只清空表单的话，页面和没提交过长得一样。
+function showRegisterDone(result) {
+  const done = $('register-done');
+  if (!done) { showMessage(result.message); return; }
+  $('register-form').hidden = true;
+  document.querySelectorAll('.identity-divider, .identity-social').forEach((el) => { el.hidden = true; });
+  $('message').hidden = true;
+  $('register-done-email').textContent = result.email || '你的邮箱';
+  done.hidden = false;
+  registeredEmail = result.email || '';
+  if (result.verificationUrl) {
+    const link = document.createElement('a');
+    link.href = result.verificationUrl;
+    link.textContent = '开发模式：立即验证';
+    link.className = 'identity-secondary';
+    link.addEventListener('click', markLauncherFlowLeaving);
+    done.querySelector('.identity-actions').appendChild(link);
+  }
+}
+
+let registeredEmail = '';
+
 if ($('register-form')) {
   $('register-form').onsubmit = async (event) => {
     event.preventDefault();
@@ -179,16 +332,20 @@ if ($('register-form')) {
         method: 'POST',
         body: JSON.stringify(form),
       });
-      showMessage(result.message);
-      if (result.verificationUrl) {
-        const a = document.createElement('a');
-        a.href = result.verificationUrl;
-        a.textContent = ' 开发模式：立即验证';
-        a.style.marginLeft = '8px';
-        a.addEventListener('click', markLauncherFlowLeaving);
-        $('message').appendChild(a);
-      }
       element.reset();
+      showRegisterDone(result);
+    } catch (error) {
+      showMessage(error.message, true);
+    }
+  };
+  $('register-resend').onclick = async () => {
+    if (!registeredEmail) return;
+    try {
+      const result = await api('/api/account/verification/resend', {
+        method: 'POST',
+        body: JSON.stringify({ email: registeredEmail }),
+      });
+      showMessage(result.message);
     } catch (error) {
       showMessage(error.message, true);
     }
@@ -230,6 +387,9 @@ if ($('external-complete-form')) {
 
 if ($('profile-form')) {
   loadAccount();
+  wireAvatar();
+  wireEmail();
+  wireDeleteAccount();
   $('profile-form').onsubmit = async (event) => {
     event.preventDefault();
     const form = Object.fromEntries(new FormData(event.currentTarget));
@@ -239,9 +399,8 @@ if ($('profile-form')) {
         body: JSON.stringify(form),
       });
       showMessage('资料已保存。游戏登录 UID 不变，在线昵称会自动同步。');
-      const user = result.user;
-      $('nickname').textContent = user.nickname;
-      $('username').textContent = `@${user.username}`;
+      account = result.user;
+      renderAccount(result.user);
     } catch (error) {
       showMessage(error.message, true);
     }

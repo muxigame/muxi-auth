@@ -5,36 +5,120 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>账户 · muxi 账户</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/account.css">
 </head>
-<body>
+<body class="account-body">
   <header class="nav">
     <a class="brand" href="/">muxi <span>// 账户</span></a>
+    <button id="logout" class="ghost-btn">退出登录</button>
   </header>
-  <main class="shell">
-    <section class="hero">
-      <div class="eyebrow">YOUR IDENTITY</div>
-      <h1 id="nickname">—</h1>
-      <p><span id="username">—</span> · UID <span id="uid">—</span></p>
-    </section>
-    <section class="card">
-      <h2>账户资料</h2>
-      <p>游戏使用固定 UID 登录，显示平台昵称。修改昵称或用户名不会改变游戏身份。</p>
-      <div id="message" class="message" hidden></div>
-      <form id="profile-form" class="form">
-        <label class="field"><span>昵称</span><input id="profile-nickname" name="nickname" maxlength="64" required></label>
-        <label class="field"><span>用户名</span><input id="profile-username" name="username" minlength="3" maxlength="16" pattern="[A-Za-z0-9_]+" required></label>
-        <button type="submit">保存修改</button>
-      </form>
-      <div class="profile">
-        <div><span>UID</span><span id="profile-uid">—</span></div>
-        <div><span>Minecraft 登录 UID</span><span id="game-name">—</span></div>
-        <div><span>邮箱</span><span id="email">未绑定</span></div>
-        <div><span>角色</span><span id="role">—</span></div>
-        <div><span>创建时间</span><span id="created">—</span></div>
+
+  <main class="account-shell">
+    <div id="message" class="message" hidden></div>
+
+    <!-- 身份头条：头像、昵称、UID。页面其余部分都是围绕这个人展开的。 -->
+    <section class="idcard">
+      <div class="idcard-avatar">
+        <img id="avatar-img" alt="" hidden>
+        <span id="avatar-initial" class="avatar-initial">—</span>
+        <button id="avatar-pick" class="avatar-edit" type="button" aria-label="更换头像">更换</button>
+        <!-- accept 只是给文件选择器的提示，真正的把关在服务端按魔数做 -->
+        <input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
       </div>
-      <button id="logout" class="secondary">退出登录</button>
+      <div class="idcard-text">
+        <h1 id="nickname">—</h1>
+        <p class="idcard-sub"><span id="username">—</span></p>
+        <div class="idcard-tags">
+          <span class="tag">UID <b id="uid">—</b></span>
+          <span class="tag" id="role-tag">—</span>
+          <span class="tag" id="verify-tag" hidden>邮箱未验证</span>
+        </div>
+      </div>
+      <button id="avatar-clear" class="ghost-btn" hidden>移除头像</button>
+    </section>
+
+    <div class="account-grid">
+      <!-- 左列：可改的东西 -->
+      <div class="account-col">
+        <section class="panel">
+          <h2>账户资料</h2>
+          <p class="panel-note">游戏使用固定 UID 登录，显示平台昵称。改昵称或用户名都不会动到游戏身份。</p>
+          <form id="profile-form" class="form">
+            <label class="field"><span>昵称</span><input id="profile-nickname" name="nickname" maxlength="64" required></label>
+            <label class="field"><span>用户名</span><input id="profile-username" name="username" minlength="3" maxlength="16" pattern="[A-Za-z0-9_]+" required></label>
+            <button type="submit">保存修改</button>
+          </form>
+        </section>
+
+        <!-- 邮箱。三种状态各有各的界面：没绑 / 待验证 / 已验证。
+             QQ、微信注册出来的账号落在第一种，这里原先只显示「未绑定」，没有出口。 -->
+        <section class="panel" id="email-panel">
+          <h2>邮箱</h2>
+
+          <div id="email-none" hidden>
+            <p class="panel-note">绑定邮箱之后才能找回账号。用 QQ 或微信注册的账号默认没有邮箱。</p>
+            <form id="email-form" class="form">
+              <label class="field"><span>邮箱地址</span><input id="email-input" name="email" type="email" required placeholder="you@example.com"></label>
+              <button type="submit">发送验证邮件</button>
+            </form>
+          </div>
+
+          <div id="email-pending" hidden>
+            <p class="panel-note">验证邮件已发往 <b id="email-pending-address">—</b>，24 小时内点击信里的链接即可完成绑定。</p>
+            <div class="actions">
+              <button id="email-resend" class="secondary" type="button">重新发送</button>
+              <button id="email-change" class="ghost-btn" type="button">换一个邮箱</button>
+            </div>
+          </div>
+
+          <div id="email-verified" hidden>
+            <div class="kv"><span>已绑定</span><b id="email-verified-address">—</b></div>
+            <p class="panel-note">如需更换已验证的邮箱，请联系管理员——换绑需要先确认你仍然持有原邮箱。</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- 右列：只读信息 + 预留位 -->
+      <div class="account-col">
+        <section class="panel">
+          <h2>游戏身份</h2>
+          <div class="kv"><span>Minecraft 登录 UID</span><b id="game-name">—</b></div>
+          <div class="kv"><span>角色</span><b id="role">—</b></div>
+          <div class="kv"><span>创建时间</span><b id="created">—</b></div>
+          <p class="panel-note">进入游戏请使用 muxi 启动器，服务器地址会自动配置。</p>
+        </section>
+
+        <!-- 预留：以后的余额、积分、订单、设备管理都往这儿放 -->
+        <section class="panel panel-empty" id="slot-future">
+          <h2>更多</h2>
+          <p class="panel-note">积分、余额与设备管理会在这里陆续开放。</p>
+        </section>
+      </div>
+    </div>
+
+    <section class="panel danger">
+      <h2>注销账号</h2>
+      <p class="panel-note">
+        注销会永久删除这个账号、绑定的邮箱和登录凭据，<b>无法撤销</b>。
+        游戏里的 UID <b id="danger-uid">—</b> 不会被回收，也不会分配给其他人，
+        但你将无法再用它登录。
+      </p>
+      <div class="actions">
+        <button id="delete-open" class="danger-btn" type="button">我要注销账号</button>
+      </div>
+      <form id="delete-form" class="form" hidden>
+        <label class="field">
+          <span>请输入你的用户名 <b id="delete-hint">—</b> 以确认</span>
+          <input id="delete-username" name="username" autocomplete="off" required>
+        </label>
+        <div class="actions">
+          <button type="submit" class="danger-btn">确认注销</button>
+          <button id="delete-cancel" class="ghost-btn" type="button">取消</button>
+        </div>
+      </form>
     </section>
   </main>
+
   <script src="/static/app.js" defer></script>
 </body>
 </html>

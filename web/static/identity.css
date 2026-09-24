@@ -195,3 +195,33 @@
   .identity-card{width:100%;min-height:100vh;border:0;box-shadow:none;padding:38px 28px}
   .identity-footer{display:none}
 }
+
+/* 注册完成屏。顶掉表单，让页面明确地变了个样子——只清空表单的话，
+   用户看到的和没提交过一模一样，会反复重试。 */
+.identity-done { text-align: center; padding: 8px 0 4px; }
+.identity-done-mark {
+  width: 56px; height: 56px; margin: 0 auto 18px;
+  display: grid; place-items: center; border-radius: 50%;
+  background: rgba(0, 120, 212, .14); border: 1px solid var(--identity-blue);
+  font-size: 26px; color: #8fc4f5;
+}
+.identity-done h2 { margin: 0 0 10px; font-size: 21px; font-weight: 600; }
+.identity-done p { margin: 0 0 8px; color: var(--identity-muted); font-size: 14px; line-height: 1.7; }
+.identity-done p b { color: var(--identity-text); word-break: break-all; }
+.identity-done-hint { font-size: 13px; }
+.identity-done .identity-actions {
+  margin-top: 22px; display: grid; gap: 10px;
+  grid-template-columns: 1fr; justify-content: stretch;
+}
+.identity-secondary {
+  height: 42px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--identity-line); border-radius: 4px;
+  background: transparent; color: var(--identity-text);
+  font: inherit; font-size: 14px; text-decoration: none; cursor: pointer;
+}
+.identity-secondary:hover { border-color: #5a5a5a; }
+
+/* 任何设了 display 的类都会盖过 hidden 属性自带的 display:none。
+   .identity-form 就是这么让「注册完成后藏掉表单」失效的：JS 设了 hidden，
+   元素照样显示在成功屏下面。 */
+[hidden] { display: none !important; }

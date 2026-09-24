@@ -11,7 +11,7 @@ from html import escape
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +19,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from .config import ROOT, settings
 from .minecraft_identity import game_identity
+from . import avatar as avatar_rules
 from . import minecraft_join as join_grants
 from .external_oauth import ExternalOAuthError, authorize_url as external_authorize_url, exchange_profile, provider_status
 from .security import OidcSigner, utc_now
@@ -144,6 +145,19 @@ class ProfileRequest(BaseModel):
     nickname: str = Field(min_length=1, max_length=64)
 
 
+class BindEmailRequest(BaseModel):
+    email: EmailStr
+
+
+class ResendRequest(BaseModel):
+    email: EmailStr
+
+
+class DeleteAccountRequest(BaseModel):
+    # 让人把用户名原样打一遍。注销不可撤销，一个「确定吗」的弹窗挡不住手滑。
+    username: str = Field(min_length=1, max_length=64)
+
+
 class ExternalCompleteRequest(BaseModel):
     ticket: str = Field(min_length=16, max_length=256)
     username: str = Field(min_length=3, max_length=16)
@@ -240,11 +254,127 @@ def register(
         f"{settings.issuer}/api/account/verify?token={quote(raw_verify)}"
         f"&continue_to={quote(safe_next, safe='')}"
     )
+    return send_verification(background, account, raw_verify, safe_next)
+
+
+def send_verification(background: BackgroundTasks, account: Account, raw_verify: str, safe_next: str) -> dict:
+    """把验证信排进后台队列，并返回前端要展示的结果。注册、补绑、重发共用。"""
+    verify_url = (
+        f"{settings.issuer}/api/account/verify?token={quote(raw_verify)}"
+        f"&continue_to={quote(safe_next, safe='')}"
+    )
     background.add_task(send_verification_email, account.email, account.nickname, verify_url)
-    result = {"ok": True, "message": "验证邮件已发送，请在 24 小时内完成验证"}
+    result = {
+        "ok": True,
+        # 把地址回给前端，界面才能写出「已发往 x@y」——只说「已发送」的话，
+        # 打错一个字母的人会一直等一封永远不会到的信。
+        "email": account.email,
+        "message": "验证邮件已发送，请在 24 小时内完成验证",
+    }
     if settings.dev_verify:
         result["verificationUrl"] = verify_url
     return result
+
+
+@app.post("/api/account/email")
+def bind_email(payload: BindEmailRequest, request: Request, background: BackgroundTasks) -> dict:
+    """给 QQ / 微信注册出来的账号补一个邮箱，或改掉还没验证的那个。"""
+    account = current_web_account(request)
+    if account is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    if not settings.smtp_host and not settings.dev_verify:
+        raise HTTPException(status_code=503, detail="邮件验证服务尚未启用")
+    try:
+        raw_verify = store.bind_email(account.id, str(payload.email))
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    refreshed = store.account_by_uid(account.uid) or account
+    return send_verification(background, refreshed, raw_verify, "/account")
+
+
+@app.post("/api/account/verification/resend")
+def resend_verification(payload: ResendRequest, background: BackgroundTasks) -> dict:
+    """重发验证信。
+
+    **故意不要求登录**：登录本身就卡着「邮箱已验证」，没收到信的人否则永远进不来。
+    也**故意不区分**查无此人 / 已经验证过 —— 分开回答就等于把这个接口变成邮箱探测器。
+    """
+    if not settings.smtp_host and not settings.dev_verify:
+        raise HTTPException(status_code=503, detail="邮件验证服务尚未启用")
+    pending = store.resend_verification(str(payload.email))
+    if pending is None:
+        return {"ok": True, "message": "如果该邮箱尚待验证，我们已经重新发送了一封验证邮件"}
+    account, raw_verify = pending
+    result = send_verification(background, account, raw_verify, "/account")
+    result["message"] = "如果该邮箱尚待验证，我们已经重新发送了一封验证邮件"
+    return result
+
+
+@app.post("/api/account/avatar")
+async def upload_avatar(request: Request, file: UploadFile = File(...)) -> dict:
+    account = current_web_account(request)
+    if account is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    # 先卡长度再读：不设上限的话，一个大文件就能把内存顶穿。多读一个字节用来判超限。
+    data = await file.read(avatar_rules.MAX_BYTES + 1)
+    try:
+        content_type, etag = avatar_rules.validate(data)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    store.set_avatar(account.id, data, content_type, etag)
+    return {"ok": True, "avatarUrl": f"/api/account/avatar/{account.uid}?v={etag}"}
+
+
+@app.delete("/api/account/avatar")
+def delete_avatar(request: Request) -> dict:
+    account = current_web_account(request)
+    if account is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    store.clear_avatar(account.id)
+    return {"ok": True}
+
+
+@app.get("/api/account/avatar/{uid}")
+def serve_avatar(uid: int) -> Response:
+    """按 UID 提供头像。头像本来就要显示给同服玩家看，不需要登录。
+
+    Content-Type 用的是服务端按魔数判出来的那个，不是上传时客户端说的那个。
+    """
+    found = store.avatar(uid)
+    if found is None:
+        raise HTTPException(status_code=404, detail="没有头像")
+    data, content_type, etag = found
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={
+            # URL 带内容指纹，所以可以让浏览器放心长缓存：换头像就是换 URL。
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "ETag": f'"{etag}"',
+            "Content-Disposition": "inline",
+        },
+    )
+
+
+@app.delete("/api/account")
+def delete_account(payload: DeleteAccountRequest, request: Request, response: Response) -> dict:
+    """注销账号。不可撤销。
+
+    要求把用户名原样打一遍再执行——注销会级联删掉邮箱、会话和令牌，
+    一个「确定吗」的弹窗挡不住手滑。
+
+    UID 不回收：游戏存档是按 UID 推出来的离线 UUID 存的，回收等于把新注册的人
+    扔进别人的身体里。
+    """
+    account = current_web_account(request)
+    if account is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    if payload.username.strip().lower() != account.username.lower():
+        raise HTTPException(status_code=422, detail="用户名不匹配，账号未注销")
+    if not store.delete_account(account.id):
+        raise HTTPException(status_code=404, detail="账号不存在")
+    response.delete_cookie("muxi_session", path="/")
+    return {"ok": True, "message": "账号已注销"}
 
 
 @app.get("/api/account/verify")

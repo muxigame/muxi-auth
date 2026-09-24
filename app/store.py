@@ -19,6 +19,11 @@ def iso(value: datetime) -> str:
     return value.isoformat()
 
 
+def _has(row: sqlite3.Row, column: str) -> bool:
+    """这一行查询里有没有这一列。并非每条 SQL 都 JOIN 了头像表。"""
+    return column in row.keys()
+
+
 @dataclass(frozen=True)
 class Account:
     id: int
@@ -32,6 +37,8 @@ class Account:
     email_verified: bool
     created_at: str
     last_login_at: str | None
+    #: 头像内容的指纹。为 None 表示没设过头像；用在 URL 上让浏览器换图时不吃旧缓存。
+    avatar_etag: str | None = None
 
     def claims(self) -> dict:
         claims = {
@@ -59,6 +66,8 @@ class Account:
             "gameName": str(self.uid),
             "role": self.role,
             "verified": self.email_verified,
+            # 带指纹的地址：换了头像就是一个新 URL，不会被浏览器拿旧图糊弄过去。
+            "avatarUrl": f"/api/account/avatar/{self.uid}?v={self.avatar_etag}" if self.avatar_etag else None,
             "createdAt": self.created_at,
             "lastLoginAt": self.last_login_at,
         }
@@ -152,6 +161,13 @@ class Store:
                     account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
                     token_hash TEXT NOT NULL UNIQUE,
                     expires_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS account_avatars (
+                    account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+                    content_type TEXT NOT NULL,
+                    bytes BLOB NOT NULL,
+                    etag TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS web_sessions (
                     token_hash TEXT PRIMARY KEY,
@@ -265,10 +281,12 @@ class Store:
     def _account_query() -> str:
         return """
             SELECT a.*, e.email AS primary_email,
-                   COALESCE(e.verified,0) AS primary_email_verified
+                   COALESCE(e.verified,0) AS primary_email_verified,
+                   v.etag AS avatar_etag
             FROM accounts a
             LEFT JOIN account_emails e
               ON e.account_id=a.id AND e.is_primary=1
+            LEFT JOIN account_avatars v ON v.account_id=a.id
         """
 
     @staticmethod
@@ -287,6 +305,7 @@ class Store:
             email_verified=bool(row["primary_email_verified"]),
             created_at=str(row["created_at"]),
             last_login_at=row["last_login_at"],
+            avatar_etag=str(row["avatar_etag"]) if _has(row, "avatar_etag") and row["avatar_etag"] else None,
         )
 
     @staticmethod
@@ -326,6 +345,102 @@ class Store:
                 db.execute(self._account_query() + " WHERE a.id=?", (account_id,)).fetchone()
             )
         return account, raw_verify  # type: ignore[return-value]
+
+    def bind_email(self, account_id: int, email: str) -> str:
+        """给账号绑定邮箱，返回验证令牌。
+
+        QQ / 微信注册出来的账号一个邮箱都没有，而找回密码、换设备登录都要靠它，
+        所以必须能补绑。已经验证过的邮箱这里不给改——那是另一件事（要先证明还
+        握着旧邮箱），混在一起做会变成一条接管账号的捷径。
+        """
+        now = utc_now()
+        raw_verify = random_token(32)
+        with self._lock, self.connect() as db:
+            row = db.execute(
+                "SELECT email,verified FROM account_emails WHERE account_id=? AND is_primary=1",
+                (account_id,),
+            ).fetchone()
+            if row is not None and bool(row["verified"]):
+                raise ValueError("该账号已经绑定并验证过邮箱")
+            try:
+                if row is None:
+                    db.execute(
+                        """INSERT INTO account_emails(account_id,email,verified,is_primary,created_at)
+                           VALUES(?,?,0,1,?)""",
+                        (account_id, email.lower(), iso(now)),
+                    )
+                else:
+                    # 还没验证的那个可以直接换掉：写错地址的人否则就卡死了。
+                    db.execute(
+                        "UPDATE account_emails SET email=?,created_at=? WHERE account_id=? AND is_primary=1",
+                        (email.lower(), iso(now), account_id),
+                    )
+            except sqlite3.IntegrityError as error:
+                raise ValueError("该邮箱已经被其它账号使用") from error
+            # 一个账号同时只留一张待验证的票，重发即作废上一张。
+            db.execute(
+                "INSERT OR REPLACE INTO email_verifications(account_id,token_hash,expires_at) VALUES(?,?,?)",
+                (account_id, token_hash(raw_verify), iso(now + timedelta(hours=24))),
+            )
+        return raw_verify
+
+    def resend_verification(self, email: str) -> tuple[Account, str] | None:
+        """重发验证信。
+
+        **必须免登录**：登录本身就要求邮箱已验证，没收到信的人否则永远进不来。
+        调用方不要把「查无此人」和「已经验证过」区分着告诉前端，那等于拿这个接口
+        当邮箱探测器用；两种情况都回同一句话。
+        """
+        now = utc_now()
+        raw_verify = random_token(32)
+        with self._lock, self.connect() as db:
+            row = db.execute(
+                self._account_query() + " WHERE e.email=? COLLATE NOCASE AND e.verified=0",
+                (email.lower(),),
+            ).fetchone()
+            account = self._account(row)
+            if account is None:
+                return None
+            db.execute(
+                "INSERT OR REPLACE INTO email_verifications(account_id,token_hash,expires_at) VALUES(?,?,?)",
+                (account.id, token_hash(raw_verify), iso(now + timedelta(hours=24))),
+            )
+        return account, raw_verify
+
+    def set_avatar(self, account_id: int, data: bytes, content_type: str, etag: str) -> None:
+        with self._lock, self.connect() as db:
+            db.execute(
+                """INSERT INTO account_avatars(account_id,content_type,bytes,etag,updated_at)
+                   VALUES(?,?,?,?,?)
+                   ON CONFLICT(account_id) DO UPDATE SET
+                     content_type=excluded.content_type, bytes=excluded.bytes,
+                     etag=excluded.etag, updated_at=excluded.updated_at""",
+                (account_id, content_type, data, etag, iso(utc_now())),
+            )
+
+    def avatar(self, uid: int) -> tuple[bytes, str, str] | None:
+        """按 UID 取头像，返回 (内容, content-type, etag)。"""
+        with self.connect() as db:
+            row = db.execute(
+                """SELECT v.bytes,v.content_type,v.etag FROM account_avatars v
+                   JOIN accounts a ON a.id=v.account_id WHERE a.uid=?""",
+                (uid,),
+            ).fetchone()
+        return (bytes(row["bytes"]), str(row["content_type"]), str(row["etag"])) if row else None
+
+    def clear_avatar(self, account_id: int) -> None:
+        with self._lock, self.connect() as db:
+            db.execute("DELETE FROM account_avatars WHERE account_id=?", (account_id,))
+
+    def delete_account(self, account_id: int) -> bool:
+        """注销账号。外键级联会带走邮箱、会话、令牌、头像。
+
+        UID 不回收：uid_sequence 只增不减。游戏存档是按 UID 推出来的 UUID 存的，
+        回收 UID 等于把新人扔进别人的身体里。
+        """
+        with self._lock, self.connect() as db:
+            cur = db.execute("DELETE FROM accounts WHERE id=?", (account_id,))
+            return cur.rowcount > 0
 
     def verify_email(self, raw_token: str) -> Account | None:
         with self._lock, self.connect() as db:

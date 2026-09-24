@@ -22,6 +22,19 @@
 
       <div id="message" class="identity-message" hidden></div>
 
+      <!-- 注册成功后顶掉整个表单。原先只是清空表单再弹一句"验证邮件已发送"，
+           页面看上去和没提交过一模一样，用户以为失败了、反复重试。 -->
+      <div id="register-done" class="identity-done" hidden>
+        <div class="identity-done-mark" aria-hidden="true">✉</div>
+        <h2>去邮箱收一封验证信</h2>
+        <p>我们已经把验证链接发到 <b id="register-done-email">—</b>，24 小时内点开即可完成注册。</p>
+        <p class="identity-done-hint">没收到？先翻一下垃圾邮件，或者换个地址重来。</p>
+        <div class="identity-actions">
+          <button type="button" class="identity-primary" id="register-resend">重新发送</button>
+          <a class="identity-secondary" href="/login" data-preserve-continue>去登录</a>
+        </div>
+      </div>
+
       <form id="register-form" class="identity-form">
         <label class="identity-field">
           <span>昵称</span>
