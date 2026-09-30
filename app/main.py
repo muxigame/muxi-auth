@@ -22,7 +22,7 @@ from .minecraft_identity import game_identity
 from . import avatar as avatar_rules
 from . import minecraft_join as join_grants
 from .external_oauth import ExternalOAuthError, authorize_url as external_authorize_url, exchange_profile, provider_status
-from .security import OidcSigner, utc_now
+from .security import OidcSigner, utc_now, token_hash
 from .store import Account, OAuthClient, Store
 
 
@@ -162,6 +162,20 @@ class ExternalCompleteRequest(BaseModel):
     ticket: str = Field(min_length=16, max_length=256)
     username: str = Field(min_length=3, max_length=16)
     nickname: str = Field(min_length=1, max_length=64)
+
+
+class BindingRequest(BaseModel):
+    action: str = "bind"
+    password: str = Field(default="", max_length=128)
+
+
+def binding_account(request: Request, *, mutation: bool = False) -> Account:
+    account = current_web_account(request)
+    if account is None:
+        raise HTTPException(status_code=401, detail="请先登录当前 muxi 账号")
+    if mutation and (request.headers.get("origin") != settings.issuer or request.headers.get("x-muxi-account-action") != "1"):
+        raise HTTPException(status_code=403, detail="请求来源校验失败，请从账号页操作")
+    return account
 
 
 def current_web_account(request: Request) -> Account | None:
@@ -460,6 +474,59 @@ def external_providers(response: Response) -> dict:
     return {"providers": provider_status()}
 
 
+@app.get("/api/account/external")
+def account_external(request: Request) -> dict:
+    account = binding_account(request)
+    return {**store.external_bindings(account.id), "providers": provider_status()}
+
+
+@app.post("/api/account/external/{provider}/start")
+def start_account_binding(provider: str, payload: BindingRequest, request: Request) -> dict:
+    account = binding_account(request, mutation=True)
+    if payload.action not in ("bind", "replace"):
+        raise HTTPException(status_code=400, detail="无效的绑定操作")
+    try:
+        session = request.cookies.get("muxi_session", "")
+        store.authorize_binding_change(account.id, session, payload.password)
+        expected = store.binding_snapshot(account.id, provider, payload.action == "replace")
+        state, verifier = store.create_external_state(provider, "/account", account_id=account.id, session=session, expected_id=expected)
+        url = external_authorize_url(provider, state, verifier, user_agent=request.headers.get("user-agent", ""), binding=True)
+    except (ValueError, ExternalOAuthError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"url": url}
+
+
+@app.get("/api/account/external/pending")
+def pending_account_binding(request: Request) -> dict:
+    account = binding_account(request)
+    return {"pending": store.pending_external_binding(request.cookies.get("muxi_binding_ticket", ""), account.id, request.cookies.get("muxi_session", ""))}
+
+
+@app.post("/api/account/external/confirm")
+def confirm_account_binding(payload: BindingRequest, request: Request, response: Response) -> dict:
+    account = binding_account(request, mutation=True)
+    if payload.action not in ("confirm", "cancel"):
+        raise HTTPException(status_code=400, detail="无效的确认操作")
+    try:
+        store.finish_external_binding(request.cookies.get("muxi_binding_ticket", ""), account.id, request.cookies.get("muxi_session", ""), cancel=payload.action == "cancel")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    response.delete_cookie("muxi_binding_ticket", path="/api/account/external")
+    return {"ok": True}
+
+
+@app.post("/api/account/external/{provider}/unlink")
+def unlink_account_binding(provider: str, payload: BindingRequest, request: Request) -> dict:
+    account = binding_account(request, mutation=True)
+    session = request.cookies.get("muxi_session", "")
+    try:
+        store.authorize_binding_change(account.id, session, payload.password)
+        store.unlink_external(account.id, provider, session)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"ok": True}
+
+
 @app.post("/api/launcher/auth-flow", status_code=201)
 def create_launcher_auth_flow() -> dict:
     flow, secret = store.create_launcher_auth_flow()
@@ -514,15 +581,23 @@ def external_start(provider: str, request: Request, continue_to: str = "/account
 
 @app.get("/external/czl/callback")
 def external_czl_callback(
+    request: Request,
     state: str = "",
     code: str = "",
     error: str = "",
 ) -> RedirectResponse:
-    consumed = store.consume_external_state(state) if state else None
+    consumed = store.consume_external_state_context(state) if state else None
     if consumed is None:
         return RedirectResponse("/login?external=invalid_state", status_code=303)
-    provider, verifier, continue_to = consumed
+    provider, verifier, continue_to = consumed["provider"], consumed["code_verifier"], consumed["continue_to"]
+    binding = consumed["purpose"] == "binding"
+    if binding:
+        account = current_web_account(request)
+        if account is None or account.id != consumed["account_id"] or token_hash(request.cookies.get("muxi_session", "")) != consumed["session_hash"]:
+            return RedirectResponse("/account?binding=session_changed", status_code=303)
     if error or not code:
+        if binding:
+            return RedirectResponse("/account?binding=cancelled", status_code=303)
         return RedirectResponse(
             f"/login?external={quote(error or 'cancelled', safe='')}&continue={quote(continue_to, safe='')}",
             status_code=303,
@@ -530,9 +605,19 @@ def external_czl_callback(
     try:
         profile = exchange_profile(provider, code, verifier)
     except ExternalOAuthError:
+        if binding:
+            return RedirectResponse("/account?binding=failed", status_code=303)
         return RedirectResponse(
             f"/login?external=failed&continue={quote(continue_to, safe='')}", status_code=303
         )
+
+    if binding:
+        ticket = store.prepare_external_binding(consumed, {"subject": profile.subject, "upstream_subject": profile.upstream_subject,
+            "nickname": profile.nickname, "raw_profile": profile.raw_profile})
+        response = RedirectResponse("/account?binding=confirm", status_code=303)
+        response.set_cookie("muxi_binding_ticket", ticket, httponly=True, secure=settings.secure_cookies,
+                            samesite="lax", max_age=600, path="/api/account/external")
+        return response
 
     account = store.external_account(
         provider,

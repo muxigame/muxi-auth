@@ -40,6 +40,22 @@
     <div class="account-grid">
       <!-- 左列：可改的东西 -->
       <div class="account-col">
+        <section class="panel" id="external-bindings-panel">
+          <h2>QQ / 微信绑定</h2>
+          <p class="panel-note">未绑定的渠道可以补绑。换绑成功前保留旧绑定，取消授权不会影响原账号。绑定变更会使其他设备的登录凭据失效，UID 和游戏存档不变。</p>
+          <p id="binding-status" class="panel-note" role="status">正在读取绑定状态…</p>
+          <label class="field" id="binding-password-field" hidden><span>当前 muxi 账号密码（不是 QQ / 微信密码）</span><input id="binding-password" type="password" autocomplete="current-password" maxlength="128"></label>
+          <div id="binding-rows"></div>
+          <div id="binding-confirmation" hidden>
+            <h3>确认本次授权</h3>
+            <p id="binding-preview" class="panel-note"></p>
+            <p class="panel-note">请确认刚才授权的是你想绑定的账号。换绑时请在 QQ / 微信授权页面切换到新账号，不要直接复用原账号。</p>
+            <div class="actions">
+              <button id="binding-confirm" type="button">确认绑定</button>
+              <button id="binding-cancel" type="button" class="ghost-btn">取消，保留原绑定</button>
+            </div>
+          </div>
+        </section>
         <section class="panel">
           <h2>账户资料</h2>
           <p class="panel-note">游戏使用固定 UID 登录，显示平台昵称。改昵称或用户名都不会动到游戏身份。</p>

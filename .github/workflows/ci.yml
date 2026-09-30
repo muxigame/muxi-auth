@@ -17,9 +17,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements*.txt
       - name: Install dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements.txt
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
       - name: Run unit tests
         env:
           MUXI_ISSUER: http://127.0.0.1:9000

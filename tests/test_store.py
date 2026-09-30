@@ -87,7 +87,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(
             account.subject,
             self.store.external_account(
-                "wechat",
+                "qq",
                 "czl:czl-user-1",
                 raw_profile=raw_profile,
                 upstream_subject="openid:qq-openid-1",
@@ -98,7 +98,8 @@ class StoreTests(unittest.TestCase):
                 "SELECT provider,upstream_subject,raw_profile FROM external_identities WHERE account_id=?",
                 (account.id,),
             ).fetchone()
-        self.assertEqual("czl", row["provider"])
+        self.assertEqual("qq", row["provider"])
+        self.assertIsNone(self.store.external_account("wechat", "czl:czl-user-1", upstream_subject="openid:qq-openid-1"))
         self.assertEqual("openid:qq-openid-1", row["upstream_subject"])
         self.assertIn('"upstreams"', row["raw_profile"])
         with self.assertRaises(ValueError):

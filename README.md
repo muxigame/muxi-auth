@@ -55,6 +55,18 @@ CZL 的 Cookie 由浏览器在 CZL 域名下接收；不能在 muxi 后端抓取
 入口的长期兼容性。若 CZL 调整路由，可在服务器设置 `MUXI_CZL_DIRECT_UPSTREAM=0` 后
 重新创建容器，回退到常规授权入口，不需要更换 AppID 或改动 Better MC 客户端。
 
+## 账号页 QQ / 微信管理
+
+账号页支持分别查看 QQ、微信绑定状态，补绑、解绑及换绑。开始操作须验证当前 muxi 密码；无密码账号须在重新登录后 10 分钟内操作。绑定/换绑通过 CZL 授权，返回原浏览器、原登录会话后展示待确认身份，确认成功才写入；取消、身份冲突或并发过期均不删除旧绑定。
+
+渠道按 CZL 已验证 userinfo 中的 `upstream_type` / `upstream_user_id` 等稳定标识区分；不能再用聚合 CZL 身份让已解绑渠道绕回原账号。一个第三方账号/关联 CZL 身份不能抢占另一个 muxi 账号，不自动合并存档。不能解绑最后一种可用登录方式；只有邮箱但没有密码不算可用的邮箱密码登录。
+
+变更后保留当前网页会话，撤销其他网页会话、OAuth access/refresh token 和未使用授权码。UID、昵称和游戏数据不变。新接口限定同源请求及自定义请求头；绑定 state、待确认票据均一次性、短时有效且绑定当前账号/会话。
+
+部署前必须备份 SQLite 数据库（运行中用 SQLite backup，不只拷贝 WAL 数据库主文件）。首次启动添加状态上下文/待确认/审计表，并将有可靠上游信息的旧 `czl` 关联拆为 QQ/微信关联；无法识别的旧数据保留，要求通过原渠道重新登录更新信息，不猜测、不静默丢弃。回滚须配套恢复数据库备份，旧代码不理解新渠道映射。未经授权不要直接发布版本标签或重建生产容器。
+
+开发测试安装 `requirements-dev.txt`，再执行 `python -m unittest discover -s tests`。测试数据库、签名密钥应通过 `MUXI_DATABASE_PATH`、`MUXI_SIGNING_KEY_PATH` 指向临时目录。模拟授权测试不代替真人 QQ/微信授权验收。
+
 ## 预置客户端
 
 `better-mc-launcher` 是 public native client，不存在 `client_secret`。它使用系统浏览器、Authorization Code + PKCE，并回调到 `127.0.0.1` 的随机端口。
@@ -64,4 +76,3 @@ CZL 的 Cookie 由浏览器在 CZL 域名下接收；不能在 muxi 后端抓取
 ## 安全边界
 
 Minecraft 本体目前不接 OAuth。Better MC Launcher 登录成功后只把 muxi 用户名传给现有 OfflineAuth，因此游戏服务器侧仍保持当前离线 UUID 逻辑。
-

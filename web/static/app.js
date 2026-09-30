@@ -136,6 +136,96 @@ async function loadAccount() {
 
 function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
 
+async function loadBindings() {
+  if (!$('binding-rows')) return;
+  try {
+    const info = await api('/api/account/external');
+    $('binding-password-field').hidden = !info.requiresPassword;
+    $('binding-status').textContent = info.legacy
+      ? '历史授权尚未识别具体渠道，请先用原 QQ / 微信重新登录后操作。'
+      : info.requiresPassword ? '操作前请填写当前 muxi 账号密码。' : '无密码账号请在重新登录后 10 分钟内操作；不能解绑最后一种登录方式。';
+    $('binding-rows').replaceChildren();
+    for (const [provider, name] of [['qq', 'QQ'], ['wechat', '微信']]) {
+      const binding = info.bindings[provider];
+      const row = document.createElement('div');
+      row.className = 'binding-row';
+      const label = document.createElement('p');
+      label.textContent = `${name} · ${binding.bound ? '已绑定' : '未绑定'}${binding.nickname ? ` · ${binding.nickname}` : ''}`;
+      row.append(label);
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      for (const [action, text] of binding.bound ? [['replace', '换绑'], ['unlink', '解绑']] : [['bind', '绑定']]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = text;
+        button.className = action === 'unlink' ? 'ghost-btn' : 'secondary';
+        button.disabled = info.legacy || (action !== 'unlink' && !info.providers[provider]);
+        if (!info.providers[provider] && action !== 'unlink') button.title = '该登录渠道暂不可用';
+        button.onclick = () => bindingAction(provider, name, action);
+        actions.append(button);
+      }
+      row.append(actions);
+      $('binding-rows').append(row);
+    }
+    const { pending } = await api('/api/account/external/pending');
+    $('binding-confirmation').hidden = !pending;
+    if (pending) {
+      $('binding-preview').textContent = `${pending.replacing ? '换绑' : '绑定'} ${pending.provider === 'qq' ? 'QQ' : '微信'}：${pending.nickname || '未提供昵称'}（身份标记 ${pending.identityHint}）。确认后关联到当前 muxi 账号。`;
+      $('binding-confirm').textContent = pending.replacing ? '确认换绑' : '确认绑定';
+    }
+  } catch (error) {
+    $('binding-status').textContent = error.message;
+    showMessage(error.message, true);
+  }
+}
+
+let bindingBusy = false;
+async function bindingAction(provider, name, action) {
+  if (bindingBusy) return;
+  if (action === 'unlink' && !confirm(`确定解绑 ${name} 吗？这会让其他设备的登录凭据失效。`)) return;
+  if (action === 'replace' && !confirm(`即将授权新的 ${name} 账号。授权返回后还需确认，确认成功前不会解除旧绑定。`)) return;
+  bindingBusy = true;
+  document.querySelectorAll('#binding-rows button').forEach(b => { b.disabled = true; });
+  try {
+    const result = await api(`/api/account/external/${provider}/${action === 'unlink' ? 'unlink' : 'start'}`, {
+      method: 'POST', headers: { 'X-Muxi-Account-Action': '1' },
+      body: JSON.stringify({ action, password: $('binding-password').value }),
+    });
+    $('binding-password').value = '';
+    if (result.url) { location.assign(result.url); return; }
+    showMessage(`${name} 已解绑，其他设备需要重新登录。`);
+  } catch (error) {
+    $('binding-password').value = '';
+    showMessage(error.message, true);
+  } finally {
+    bindingBusy = false;
+    await loadBindings();
+  }
+}
+
+async function finishBinding(action) {
+  if (bindingBusy) return;
+  bindingBusy = true;
+  $('binding-confirm').disabled = true;
+  $('binding-cancel').disabled = true;
+  try {
+    await api('/api/account/external/confirm', { method: 'POST', headers: { 'X-Muxi-Account-Action': '1' }, body: JSON.stringify({ action }) });
+    showMessage(action === 'cancel' ? '已取消，原绑定不变。' : '绑定已更新，其他设备需要重新登录。');
+    history.replaceState(null, '', '/account');
+    await loadBindings();
+  } catch (error) { showMessage(error.message, true); }
+  finally { bindingBusy = false; $('binding-confirm').disabled = false; $('binding-cancel').disabled = false; }
+}
+
+if ($('binding-rows')) {
+  loadBindings();
+  $('binding-confirm').onclick = () => finishBinding('confirm');
+  $('binding-cancel').onclick = () => finishBinding('cancel');
+  const status = new URLSearchParams(location.search).get('binding');
+  const messages = { cancelled: '授权已取消，原绑定不变。', failed: '未能验证第三方身份，原绑定不变，请重新授权。', session_changed: '登录账号或会话已变化，本次绑定未生效，请重新发起。' };
+  if (messages[status]) showMessage(messages[status], status !== 'cancelled');
+}
+
 function renderAccount(user) {
   setText('nickname', user.nickname || user.username);
   setText('username', `@${user.username}`);

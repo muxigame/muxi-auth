@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import settings
+from .external_identity import upstream_subject as verified_upstream_subject
 
 
 class ExternalOAuthError(RuntimeError):
@@ -36,7 +37,7 @@ def pkce_s256(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
-def authorize_url(provider: str, state: str, code_verifier: str, *, user_agent: str = "") -> str:
+def authorize_url(provider: str, state: str, code_verifier: str, *, user_agent: str = "", binding: bool = False) -> str:
     if provider not in {"qq", "wechat"}:
         raise ExternalOAuthError("不支持的第三方登录方式")
     if not provider_status()[provider]:
@@ -52,6 +53,7 @@ def authorize_url(provider: str, state: str, code_verifier: str, *, user_agent: 
             "code_challenge_method": "S256",
             "code_challenge": pkce_s256(code_verifier),
             "upstream_providers": provider,
+            **({"prompt": "consent"} if binding else {}),
         }
     )
     authorization = f"{settings.czl_authorize_endpoint}?{params}"
@@ -165,41 +167,8 @@ def _userinfo(access_token: str) -> dict[str, Any]:
     raise ExternalOAuthError("无法读取 CZL Connect 用户信息") from last_error
 
 
-def _candidate_provider(value: Any) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip().lower()
-    aliases = {
-        "weixin": "wechat",
-        "wx": "wechat",
-        "we_chat": "wechat",
-        "qqconnect": "qq",
-    }
-    return aliases.get(text, text)
-
-
 def _find_upstream_subject(profile: dict[str, Any], provider: str) -> str | None:
-    upstreams = profile.get("upstreams")
-    if not isinstance(upstreams, list):
-        return None
-    id_keys = ("unionid", "openid", "sub", "subject", "uid", "user_id", "id")
-    provider_keys = ("provider", "type", "name", "platform", "source")
-    for item in upstreams:
-        if not isinstance(item, dict):
-            continue
-        item_provider = ""
-        for key in provider_keys:
-            if key in item:
-                item_provider = _candidate_provider(item.get(key))
-                if item_provider:
-                    break
-        if item_provider and item_provider != provider:
-            continue
-        for key in id_keys:
-            value = item.get(key)
-            if value is not None and str(value).strip():
-                return f"{key}:{str(value).strip()}"
-    return None
+    return verified_upstream_subject(profile, provider)
 
 
 def exchange_profile(provider: str, code: str, code_verifier: str) -> ExternalProfile:
@@ -213,6 +182,9 @@ def exchange_profile(provider: str, code: str, code_verifier: str) -> ExternalPr
     sub = str(profile.get("sub") or profile.get("id") or "").strip()
     if not sub:
         raise ExternalOAuthError("CZL Connect userinfo 缺少稳定用户标识")
+    upstream = _find_upstream_subject(profile, provider)
+    if not upstream:
+        raise ExternalOAuthError("未能确认所选 QQ/微信身份，请在 CZL 绑定对应渠道后重试")
 
     nickname = str(
         profile.get("nickname") or profile.get("name") or profile.get("username") or ""
@@ -222,5 +194,5 @@ def exchange_profile(provider: str, code: str, code_verifier: str) -> ExternalPr
         subject=f"czl:{sub}",
         nickname=nickname,
         raw_profile=profile,
-        upstream_subject=_find_upstream_subject(profile, provider),
+        upstream_subject=upstream,
     )

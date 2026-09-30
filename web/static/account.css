@@ -113,3 +113,7 @@
 
 /* 同 identity.css：面板和表单都设了 display，不加这条 hidden 属性就不生效。 */
 [hidden] { display: none !important; }
+/* Provider identities stay separate and usable on narrow mobile screens. */
+.binding-row { padding: 12px 0; border-bottom: 1px solid var(--border, #ddd); }
+.binding-row p, #binding-preview { overflow-wrap: anywhere; }
+#binding-confirmation { margin-top: 18px; }

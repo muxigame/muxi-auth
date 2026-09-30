@@ -13,6 +13,7 @@ from typing import Iterator
 from urllib.parse import urlsplit
 
 from .security import hash_password, needs_rehash, pkce_s256, random_token, token_hash, utc_now, verify_password
+from .external_identity import upstream_subject as verified_upstream_subject
 
 
 def iso(value: datetime) -> str:
@@ -254,6 +255,22 @@ class Store:
                     created_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS external_binding_pending (
+                    token_hash TEXT PRIMARY KEY,
+                    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                    session_hash TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    expected_id INTEGER,
+                    profile TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS external_binding_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
             for table, additions in {
@@ -263,6 +280,10 @@ class Store:
                 },
                 "external_oauth_states": {
                     "code_verifier": "TEXT",
+                    "purpose": "TEXT NOT NULL DEFAULT 'login'",
+                    "account_id": "INTEGER REFERENCES accounts(id) ON DELETE CASCADE",
+                    "session_hash": "TEXT",
+                    "expected_id": "INTEGER",
                 },
                 "external_signups": {
                     "upstream_subject": "TEXT",
@@ -276,6 +297,142 @@ class Store:
                 for name, column_type in additions.items():
                     if name not in columns:
                         db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
+            self._migrate_external_channels(db)
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS external_account_channel ON external_identities(account_id,provider) WHERE provider IN ('qq','wechat')")
+
+    @staticmethod
+    def _migrate_external_channels(db) -> None:
+        for row in db.execute("SELECT * FROM external_identities WHERE provider='czl'").fetchall():
+            try:
+                profile = json.loads(row["raw_profile"] or "{}")
+            except (ValueError, TypeError):
+                continue
+            channels = {p: verified_upstream_subject(profile, p) for p in ("qq", "wechat")}
+            channels = {p: s for p, s in channels.items() if s}
+            if not channels:
+                continue  # Preserve unknown historical identities; never guess a channel.
+            for provider, subject in channels.items():
+                db.execute("""INSERT INTO external_identities
+                    (account_id,provider,provider_subject,provider_nickname,upstream_subject,raw_profile,created_at,last_login_at)
+                    VALUES(?,?,?,?,?,?,?,?)""", (row["account_id"], provider, row["provider_subject"],
+                    row["provider_nickname"], subject, row["raw_profile"], row["created_at"], row["last_login_at"]))
+            db.execute("DELETE FROM external_identities WHERE id=?", (row["id"],))
+
+    def external_bindings(self, account_id: int) -> dict:
+        with self.connect() as db:
+            rows = db.execute("SELECT id,provider,provider_nickname FROM external_identities WHERE account_id=?", (account_id,)).fetchall()
+            password = db.execute("SELECT password_hash FROM accounts WHERE id=?", (account_id,)).fetchone()
+        return {"requiresPassword": bool(password and password[0]),
+                "legacy": any(r["provider"] == "czl" for r in rows),
+                "bindings": {p: {"bound": any(r["provider"] == p for r in rows),
+                    "nickname": next((r["provider_nickname"] for r in rows if r["provider"] == p), None)} for p in ("qq", "wechat")}}
+
+    def authorize_binding_change(self, account_id: int, session: str, password: str) -> None:
+        with self.connect() as db:
+            row = db.execute("SELECT password_hash FROM accounts WHERE id=?", (account_id,)).fetchone()
+            session_row = db.execute("SELECT created_at,expires_at FROM web_sessions WHERE token_hash=? AND account_id=?", (token_hash(session), account_id)).fetchone()
+        if not session_row or datetime.fromisoformat(session_row["expires_at"]) <= utc_now():
+            raise ValueError("登录已失效，请重新登录")
+        if row and row[0]:
+            if not verify_password(row[0], password):
+                raise ValueError("当前账号密码不正确")
+        elif datetime.fromisoformat(session_row["created_at"]) < utc_now() - timedelta(minutes=10):
+            raise ValueError("为保护账号，请重新登录后在 10 分钟内操作")
+
+    @staticmethod
+    def _binding_slot(db, account_id, provider):
+        if provider not in ("qq", "wechat"):
+            raise ValueError("不支持的绑定渠道")
+        if db.execute("SELECT 1 FROM external_identities WHERE account_id=? AND provider='czl'", (account_id,)).fetchone():
+            raise ValueError("历史第三方授权尚未识别渠道，请先通过原 QQ/微信重新登录")
+        return db.execute("SELECT * FROM external_identities WHERE account_id=? AND provider=?", (account_id, provider)).fetchone()
+
+    def binding_snapshot(self, account_id: int, provider: str, replace: bool) -> int | None:
+        with self.connect() as db:
+            row = self._binding_slot(db, account_id, provider)
+        if bool(row) != replace:
+            raise ValueError("绑定状态已变化，请刷新页面")
+        return int(row["id"]) if row else None
+
+    @staticmethod
+    def _invalidate_binding_sessions(db, account_id, session_hash):
+        db.execute("DELETE FROM web_sessions WHERE account_id=? AND token_hash<>?", (account_id, session_hash))
+        for table in ("access_tokens", "refresh_tokens"):
+            db.execute(f"UPDATE {table} SET revoked_at=? WHERE account_id=? AND revoked_at IS NULL", (iso(utc_now()), account_id))
+        db.execute("DELETE FROM authorization_codes WHERE account_id=?", (account_id,))
+        db.execute("DELETE FROM external_oauth_states WHERE account_id=?", (account_id,))
+        db.execute("DELETE FROM external_binding_pending WHERE account_id=?", (account_id,))
+
+    def prepare_external_binding(self, context: dict, profile: dict) -> str:
+        if not profile.get("upstream_subject"):
+            raise ValueError("未能确认第三方身份")
+        raw = random_token(32)
+        with self._lock, self.connect() as db:
+            db.execute("DELETE FROM external_binding_pending WHERE expires_at<?", (iso(utc_now()),))
+            db.execute("""INSERT INTO external_binding_pending VALUES(?,?,?,?,?,?,?)""",
+                (token_hash(raw), context["account_id"], context["session_hash"], context["provider"],
+                 context["expected_id"], json.dumps(profile, ensure_ascii=False), iso(utc_now()+timedelta(minutes=10))))
+        return raw
+
+    def pending_external_binding(self, raw: str, account_id: int, session: str) -> dict | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM external_binding_pending WHERE token_hash=? AND account_id=? AND session_hash=? AND expires_at>?",
+                (token_hash(raw), account_id, token_hash(session), iso(utc_now()))).fetchone()
+        if not row:
+            return None
+        profile = json.loads(row["profile"])
+        return {"provider": row["provider"], "nickname": profile.get("nickname"),
+                "identityHint": token_hash(profile["upstream_subject"])[:8], "replacing": row["expected_id"] is not None}
+
+    def finish_external_binding(self, raw: str, account_id: int, session: str, *, cancel: bool = False) -> None:
+        with self._lock, self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM external_binding_pending WHERE token_hash=? AND account_id=? AND session_hash=? AND expires_at>?",
+                (token_hash(raw), account_id, token_hash(session), iso(utc_now()))).fetchone()
+            if not row:
+                raise ValueError("授权确认已过期或已使用，请重新发起")
+            if cancel:
+                db.execute("DELETE FROM external_binding_pending WHERE token_hash=?", (token_hash(raw),))
+                return
+            if not db.execute("SELECT 1 FROM web_sessions WHERE token_hash=? AND account_id=? AND expires_at>?", (token_hash(session), account_id, iso(utc_now()))).fetchone():
+                raise ValueError("登录已失效")
+            old = self._binding_slot(db, account_id, row["provider"])
+            if (int(old["id"]) if old else None) != row["expected_id"]:
+                raise ValueError("绑定状态已变化，请刷新后重试")
+            profile = json.loads(row["profile"])
+            conflict = db.execute("""SELECT 1 FROM external_identities WHERE account_id<>? AND
+                (provider_subject=? OR (provider=? AND upstream_subject=?))""",
+                (account_id, profile["subject"], row["provider"], profile["upstream_subject"])).fetchone()
+            if conflict:
+                raise ValueError("该第三方账号或关联的 CZL 身份已绑定其他 muxi 账号，不能合并或转移")
+            if old and old["upstream_subject"] == profile["upstream_subject"]:
+                raise ValueError("选择的仍是原第三方账号，请在授权页面切换账号")
+            if old:
+                db.execute("DELETE FROM external_identities WHERE id=?", (old["id"],))
+            db.execute("""INSERT INTO external_identities
+                (account_id,provider,provider_subject,upstream_subject,provider_nickname,raw_profile,created_at)
+                VALUES(?,?,?,?,?,?,?)""", (account_id, row["provider"], profile["subject"], profile["upstream_subject"],
+                profile.get("nickname"), json.dumps(profile.get("raw_profile", {}), ensure_ascii=False), iso(utc_now())))
+            db.execute("INSERT INTO external_binding_events(account_id,provider,action,created_at) VALUES(?,?,?,?)",
+                (account_id, row["provider"], "replace" if old else "bind", iso(utc_now())))
+            self._invalidate_binding_sessions(db, account_id, token_hash(session))
+
+    def unlink_external(self, account_id: int, provider: str, session: str) -> None:
+        with self._lock, self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM web_sessions WHERE account_id=? AND token_hash=? AND expires_at>?", (account_id, token_hash(session), iso(utc_now()))).fetchone():
+                raise ValueError("登录已失效")
+            row = self._binding_slot(db, account_id, provider)
+            if not row:
+                raise ValueError("该渠道尚未绑定")
+            alternative = db.execute("SELECT 1 FROM external_identities WHERE account_id=? AND provider IN ('qq','wechat') AND provider<>?", (account_id, provider)).fetchone()
+            password_login = db.execute("""SELECT 1 FROM accounts a JOIN account_emails e ON e.account_id=a.id
+                WHERE a.id=? AND a.password_hash IS NOT NULL AND e.verified=1 AND e.is_primary=1""", (account_id,)).fetchone()
+            if not alternative and not password_login:
+                raise ValueError("不能解绑最后一种可用登录方式；请先绑定另一渠道，或使用换绑")
+            db.execute("DELETE FROM external_identities WHERE id=?", (row["id"],))
+            db.execute("INSERT INTO external_binding_events(account_id,provider,action,created_at) VALUES(?,?,?,?)", (account_id, provider, "unlink", iso(utc_now())))
+            self._invalidate_binding_sessions(db, account_id, token_hash(session))
 
     @staticmethod
     def _account_query() -> str:
@@ -730,7 +887,7 @@ class Store:
                 raise ValueError("账号不存在")
             return account
 
-    def create_external_state(self, provider: str, continue_to: str) -> tuple[str, str]:
+    def create_external_state(self, provider: str, continue_to: str, *, account_id: int | None = None, session: str = "", expected_id: int | None = None) -> tuple[str, str]:
         raw = random_token(32)
         verifier = random_token(48)
         now = utc_now()
@@ -745,20 +902,28 @@ class Store:
                     iso(now), iso(now + timedelta(minutes=10)),
                 ),
             )
+            if account_id is not None:
+                db.execute("UPDATE external_oauth_states SET purpose='binding',account_id=?,session_hash=?,expected_id=? WHERE state_hash=?",
+                    (account_id, token_hash(session), expected_id, token_hash(raw)))
         return raw, verifier
 
     def consume_external_state(self, raw: str) -> tuple[str, str, str] | None:
+        row = self.consume_external_state_context(raw)
+        return (row["provider"], row["code_verifier"], row["continue_to"]) if row else None
+
+    def consume_external_state_context(self, raw: str) -> dict | None:
         now = utc_now()
         with self._lock, self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute(
-                """SELECT provider,code_verifier,continue_to,expires_at
+                """SELECT *
                    FROM external_oauth_states WHERE state_hash=?""",
                 (token_hash(raw),),
             ).fetchone()
             db.execute("DELETE FROM external_oauth_states WHERE state_hash=?", (token_hash(raw),))
         if row is None or datetime.fromisoformat(str(row["expires_at"])) < now:
             return None
-        return str(row["provider"]), str(row["code_verifier"]), str(row["continue_to"])
+        return dict(row)
 
     def external_account(
         self,
@@ -767,13 +932,17 @@ class Store:
         raw_profile: dict | None = None,
         upstream_subject: str | None = None,
     ) -> Account | None:
-        identity_provider = "czl" if provider_subject.startswith("czl:") else provider
+        identity_provider = provider
         with self._lock, self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if raw_profile:
+                db.execute("UPDATE external_identities SET raw_profile=? WHERE provider='czl' AND provider_subject=?", (json.dumps(raw_profile, ensure_ascii=False), provider_subject))
+                self._migrate_external_channels(db)
             row = db.execute(
                 self._account_query()
                 + """ JOIN external_identities x ON x.account_id=a.id
-                       WHERE x.provider=? AND x.provider_subject=?""",
-                (identity_provider, provider_subject),
+                       WHERE x.provider=? AND x.provider_subject=? AND (x.upstream_subject IS NULL OR x.upstream_subject=?)""",
+                (identity_provider, provider_subject, upstream_subject),
             ).fetchone()
             if row is None:
                 return None
@@ -833,6 +1002,7 @@ class Store:
     def complete_external_signup(self, raw: str, username: str, nickname: str) -> tuple[Account, str]:
         now = utc_now()
         with self._lock, self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             signup = db.execute(
                 "SELECT * FROM external_signups WHERE token_hash=? AND expires_at>?",
                 (token_hash(raw), iso(now)),
@@ -840,12 +1010,22 @@ class Store:
             if signup is None:
                 raise ValueError("第三方注册会话无效或已过期")
 
-            identity_provider = "czl" if str(signup["provider_subject"]).startswith("czl:") else str(signup["provider"])
+            signup = dict(signup)
+            try:
+                normalized = verified_upstream_subject(json.loads(signup["raw_profile"] or "{}"), signup["provider"])
+                if normalized:
+                    signup["upstream_subject"] = normalized
+            except (ValueError, TypeError):
+                pass
+
+            identity_provider = str(signup["provider"])
             existing = db.execute(
-                "SELECT account_id FROM external_identities WHERE provider=? AND provider_subject=?",
+                "SELECT account_id,upstream_subject FROM external_identities WHERE provider=? AND provider_subject=?",
                 (identity_provider, signup["provider_subject"]),
             ).fetchone()
             if existing is not None:
+                if existing["upstream_subject"] != signup["upstream_subject"]:
+                    raise ValueError("第三方身份已变化，请登录原账号后换绑")
                 db.execute("DELETE FROM external_signups WHERE token_hash=?", (token_hash(raw),))
                 account = self._account(
                     db.execute(self._account_query() + " WHERE a.id=?", (int(existing["account_id"]),)).fetchone()
@@ -853,6 +1033,10 @@ class Store:
                 if account is None:
                     raise ValueError("第三方账号绑定异常")
                 return account, str(signup["continue_to"])
+
+            if db.execute("SELECT 1 FROM external_identities WHERE provider_subject=? OR (provider=? AND upstream_subject=?)",
+                          (signup["provider_subject"], identity_provider, signup["upstream_subject"])).fetchone():
+                raise ValueError("该 CZL 身份已关联账号，请登录原账号后手动绑定此渠道")
 
             uid = self._next_uid(db)
             try:
