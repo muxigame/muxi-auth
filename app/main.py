@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import base64
 import hmac
+import os
+from urllib.request import Request as ServiceRequest, urlopen
+from urllib.parse import urlsplit as service_urlsplit
 import json
 import re
 import smtplib
@@ -83,6 +86,35 @@ def minecraft_identity(uid: int, request: Request) -> JSONResponse:
     return JSONResponse(game_identity(account.uid, account.nickname), headers={"Cache-Control": "no-store"})
 
 
+def check_game_admission(uid: int):
+    # This gate applies only to game entry, never website login or nickname sync.
+    if os.getenv("MUXI_GAME_ADMISSION_ENABLED") != "1":
+        return
+    base = os.getenv("MUXI_GAME_PLATFORM_URL", "").rstrip("/")
+    key = os.getenv("MUXI_GAME_PLATFORM_KEY", "")
+    parsed = service_urlsplit(base)
+    local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    if len(key) < 32 or parsed.username or parsed.query or parsed.fragment or not (
+            parsed.scheme == "https" or local and parsed.scheme == "http"):
+        raise HTTPException(503, "Game admission service is not configured")
+    try:
+        req = ServiceRequest(base + "/api/internal/game/admission/" + str(uid),
+                             headers={"x-muxi-server-key": key})
+        # Do not forward credentials through redirects.
+        from urllib.request import HTTPRedirectHandler, build_opener
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+        with build_opener(NoRedirect).open(req, timeout=5) as response:
+            result = json.loads(response.read(4096))
+        if result.get("uid") != uid or type(result.get("allowed")) is not bool:
+            raise ValueError("Invalid admission response")
+    except Exception:
+        raise HTTPException(503, "Game admission service unavailable")
+    if not result["allowed"]:
+        raise HTTPException(403, "This UID is banned from game entry")
+
+
 @app.post("/api/internal/minecraft/join/{uid}", include_in_schema=False)
 def minecraft_join_consume(uid: int, request: Request) -> JSONResponse:
     """游戏服务端在放人进世界之前核销票据。没票就是冒名，409。
@@ -91,6 +123,7 @@ def minecraft_join_consume(uid: int, request: Request) -> JSONResponse:
     刷新会把在线玩家的票吃掉，玩家下次重连就进不来了。
     """
     account = minecraft_player(uid, request)
+    check_game_admission(uid)
     if not join_grants.consume(uid):
         raise HTTPException(status_code=409, detail="No pending join grant for this UID")
     return JSONResponse(game_identity(account.uid, account.nickname), headers={"Cache-Control": "no-store"})
