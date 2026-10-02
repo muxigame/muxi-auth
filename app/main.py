@@ -24,10 +24,12 @@ from . import minecraft_join as join_grants
 from .external_oauth import ExternalOAuthError, authorize_url as external_authorize_url, exchange_profile, provider_status
 from .security import OidcSigner, utc_now
 from .store import Account, OAuthClient, Store
+from .terminal_sso import TerminalSsoStore, BOOTSTRAP_SECONDS, TICKET_SECONDS, TARGET
 
 
 WEB_ROOT = ROOT / "web"
 store = Store(settings.database_path)
+terminal_sso = TerminalSsoStore(store)
 signer = OidcSigner(settings.signing_key_path)
 
 store.seed_client(
@@ -110,6 +112,117 @@ def minecraft_join_mint(request: Request) -> JSONResponse:
     )
 
 
+def terminal_enabled() -> None:
+    if not settings.terminal_sso_enabled:
+        raise HTTPException(status_code=404, detail="Terminal login is unavailable")
+
+
+class TerminalProofRequest(BaseModel):
+    challenge: str = Field(min_length=43, max_length=43)
+    requestId: str = Field(min_length=36, max_length=36)
+
+
+class TerminalTicketRequest(BaseModel):
+    proof: str = Field(min_length=43, max_length=43)
+    uid: int
+    requestId: str = Field(min_length=36, max_length=36)
+    gameSession: str = Field(min_length=36, max_length=36)
+
+
+class TerminalExchangeRequest(BaseModel):
+    ticket: str = Field(min_length=43, max_length=43)
+    verifier: str = Field(min_length=43, max_length=43)
+    requestId: str = Field(min_length=36, max_length=36)
+    target: str = Field(min_length=1, max_length=256)
+
+
+class TerminalDisconnectRequest(BaseModel):
+    uid: int
+    gameSession: str = Field(min_length=36, max_length=36)
+
+
+@app.post("/api/launcher/minecraft/terminal-bootstrap", include_in_schema=False)
+def terminal_bootstrap(request: Request) -> JSONResponse:
+    terminal_enabled()
+    token = bearer(request)
+    result = store.access_token(token)
+    if result is None or result[1] != settings.bmc_launcher_client_id:
+        raise HTTPException(status_code=401, detail="Launcher authentication required")
+    try:
+        raw = terminal_sso.bootstrap(result[0].id, token)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Launcher authentication expired") from None
+    return JSONResponse({"credential": raw, "uid": result[0].uid, "expiresInSeconds": BOOTSTRAP_SECONDS},
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/launcher/minecraft/terminal-proof", include_in_schema=False)
+def terminal_proof(payload: TerminalProofRequest, request: Request) -> JSONResponse:
+    terminal_enabled()
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("MuxiTerminal "):
+        raise HTTPException(status_code=401, detail="Terminal credential required")
+    try:
+        proof = terminal_sso.proof(auth[len("MuxiTerminal "):], payload.challenge, payload.requestId)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Terminal authentication expired") from None
+    return JSONResponse({"proof": proof}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/internal/minecraft/terminal-ticket", include_in_schema=False)
+def terminal_ticket(payload: TerminalTicketRequest, request: Request) -> JSONResponse:
+    terminal_enabled()
+    # The caller is a game server; the native account proof must independently match its player.
+    minecraft_player(payload.uid, request)
+    try:
+        ticket = terminal_sso.ticket(payload.proof, payload.uid, payload.requestId,
+                                     payload.gameSession, settings.minecraft_profile_key)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Terminal authentication failed") from None
+    return JSONResponse({"ticket": ticket, "expiresInSeconds": TICKET_SECONDS},
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/internal/minecraft/terminal-disconnect", include_in_schema=False)
+def terminal_disconnect(payload: TerminalDisconnectRequest, request: Request) -> JSONResponse:
+    terminal_enabled()
+    minecraft_player(payload.uid, request)
+    try:
+        terminal_sso.disconnect(payload.gameSession, settings.minecraft_profile_key)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid terminal session") from None
+    return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/launcher/minecraft/terminal-bootstrap/revoke", include_in_schema=False)
+def terminal_bootstrap_revoke(request: Request) -> JSONResponse:
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("MuxiTerminal "):
+        raise HTTPException(status_code=401, detail="Terminal credential required")
+    try:
+        terminal_sso.revoke_bootstrap(auth[len("MuxiTerminal "):])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid terminal credential") from None
+    return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/internal/terminal/exchange", include_in_schema=False)
+def terminal_exchange(payload: TerminalExchangeRequest, request: Request) -> JSONResponse:
+    terminal_enabled()
+    client = confidential_client_from_basic(request)
+    if client is None or client.client_id != settings.bmc_web_client_id:
+        raise HTTPException(status_code=401, detail="Platform client authentication required")
+    if payload.target != TARGET or request.headers.get("origin"):
+        raise HTTPException(status_code=403, detail="Invalid terminal audience")
+    try:
+        account = terminal_sso.exchange(payload.ticket, payload.verifier, payload.requestId)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Terminal login expired; use normal login") from None
+    # Claims come from the platform account, never from a game UID, OP flag or packet role.
+    return JSONResponse({"user": account.claims(), "target": TARGET, "audience": client.client_id},
+                        headers={"Cache-Control": "no-store"})
+
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -123,7 +236,7 @@ async def security_headers(request: Request, call_next):
     )
     if settings.secure_cookies:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    if request.url.path.startswith(("/oauth", "/api/account", "/api/launcher", "/login", "/register", "/account")):
+    if request.url.path.startswith(("/oauth", "/api/account", "/api/launcher", "/api/internal/minecraft/terminal", "/api/internal/terminal", "/login", "/register", "/account")):
         response.headers["Cache-Control"] = "no-store"
     return response
 
