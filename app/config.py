@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -40,6 +40,7 @@ def path_env(name: str, default: str) -> Path:
 class Settings:
     # Explicit rollout gate; enabling it requires a separate deployment decision.
     terminal_sso_enabled: bool = os.getenv("MUXI_TERMINAL_SSO_ENABLED", "0") == "1"
+    terminal_sso_server_key: str = field(default=os.getenv("MUXI_TERMINAL_SSO_SERVER_KEY", ""), repr=False)
     # Server-to-server nickname lookup only; never ship this key to launchers.
     minecraft_profile_key: str = os.getenv("MUXI_MC_PROFILE_KEY", "")
     issuer: str = os.getenv("MUXI_ISSUER", "http://127.0.0.1:9000").rstrip("/")

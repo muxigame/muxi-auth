@@ -2,6 +2,19 @@
 
 ## Terminal platform SSO (not deployed)
 
+`MUXI_TERMINAL_SSO_SERVER_KEY` is a dedicated 32–512 printable-ASCII server key for
+`terminal-ticket` and `terminal-disconnect` only. It has no identity-key fallback;
+an empty/invalid key or copying `MUXI_MC_PROFILE_KEY` makes terminal authority
+unavailable. The existing identity key and confidential website client keep their
+original purposes. Neither key nor bootstrap/verifier belongs in a game packet,
+URL, page script, source repository or log.
+
+A successful ticket response correlates `uid`, `requestId`, `gameSession` and
+30-second expiry. Core must validate that response and the exact current online
+listener before binding social-only terminal identity. This does not authorize
+join admission, OP, task points or settlement. Existing one-use proof/ticket,
+PKCE, source-token/process-credential revocation and disconnect cleanup remain.
+
 `MUXI_TERMINAL_SSO_ENABLED` defaults to `0`. The launcher exchanges its authenticated
 access token for a restricted game-process credential (maximum one hour, never
 longer than the originating access token remains valid). Native game code alone

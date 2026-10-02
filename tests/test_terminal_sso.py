@@ -33,7 +33,7 @@ class TerminalSsoTests(unittest.TestCase):
         with self.store.connect() as db:
             db.execute("INSERT INTO access_tokens VALUES(?,?,?,?,?,?,NULL)",
                 (token_hash(self.access), account.id, self.client_id, "openid profile", iso(now), iso(now+timedelta(hours=2))))
-        self.settings = replace(main.settings, terminal_sso_enabled=True, issuer="https://account.muxigame.com", minecraft_profile_key="s"*32)
+        self.settings = replace(main.settings, terminal_sso_enabled=True, issuer="https://account.muxigame.com", minecraft_profile_key="s"*32, terminal_sso_server_key="t"*32)
         self.patches = [patch.object(main, "store", self.store), patch.object(main, "terminal_sso", self.sso), patch.object(main, "settings", self.settings)]
         for item in self.patches: item.start()
         self.client = TestClient(main.app, base_url=self.settings.issuer)
@@ -51,7 +51,7 @@ class TerminalSsoTests(unittest.TestCase):
         return self.sso.proof(self.bootstrap, pkce_s256(self.verifier), self.request_id)
 
     def ticket(self):
-        return self.sso.ticket(self.proof(), self.account.uid, self.request_id, self.game_session, self.settings.minecraft_profile_key)
+        return self.sso.ticket(self.proof(), self.account.uid, self.request_id, self.game_session, self.settings.terminal_sso_server_key)
 
     def exchange(self, ticket, **headers):
         return self.client.post("/api/internal/terminal/exchange", json={"ticket":ticket,"verifier":self.verifier,"requestId":self.request_id,"target":TARGET},
@@ -66,7 +66,7 @@ class TerminalSsoTests(unittest.TestCase):
             headers={"Authorization":"MuxiTerminal "+boot.json()["credential"]})
         self.assertEqual(200, proof.status_code)
         ticket = self.client.post("/api/internal/minecraft/terminal-ticket", json={"proof":proof.json()["proof"],"uid":self.account.uid,
-            "requestId":self.request_id,"gameSession":self.game_session}, headers={"X-Muxi-Server-Key":self.settings.minecraft_profile_key})
+            "requestId":self.request_id,"gameSession":self.game_session}, headers={"X-Muxi-Server-Key":self.settings.terminal_sso_server_key})
         self.assertEqual(200, ticket.status_code)
         response = self.exchange(ticket.json()["ticket"])
         self.assertEqual(200, response.status_code)
@@ -79,7 +79,7 @@ class TerminalSsoTests(unittest.TestCase):
 
     def test_arbitrary_uid_or_legacy_join_grant_cannot_authorize_sso(self):
         response = self.client.post("/api/internal/minecraft/terminal-ticket", json={"proof":"x"*43,"uid":self.account.uid,
-            "requestId":self.request_id,"gameSession":self.game_session}, headers={"X-Muxi-Server-Key":self.settings.minecraft_profile_key})
+            "requestId":self.request_id,"gameSession":self.game_session}, headers={"X-Muxi-Server-Key":self.settings.terminal_sso_server_key})
         self.assertEqual(401, response.status_code)
 
     def test_wrong_account_cannot_consume_proof(self):
@@ -134,7 +134,7 @@ class TerminalSsoTests(unittest.TestCase):
         body = {"proof":proof,"uid":self.account.uid,"requestId":self.request_id,"gameSession":self.game_session}
         self.assertEqual(401, self.client.post("/api/internal/minecraft/terminal-ticket", json=body).status_code)
         self.assertEqual(200, self.client.post("/api/internal/minecraft/terminal-ticket",json=body,
-            headers={"X-Muxi-Server-Key":self.settings.minecraft_profile_key}).status_code)
+            headers={"X-Muxi-Server-Key":self.settings.terminal_sso_server_key}).status_code)
 
     def test_source_token_revocation_disables_exchange(self):
         ticket = self.ticket()
@@ -150,15 +150,15 @@ class TerminalSsoTests(unittest.TestCase):
     def test_disconnect_revokes_only_that_server_session(self):
         ticket = self.ticket()
         self.sso.disconnect(self.game_session, "different-server-key")
-        self.sso.disconnect(str(uuid.uuid4()), self.settings.minecraft_profile_key)
-        self.sso.disconnect(self.game_session, self.settings.minecraft_profile_key)
+        self.sso.disconnect(str(uuid.uuid4()), self.settings.terminal_sso_server_key)
+        self.sso.disconnect(self.game_session, self.settings.terminal_sso_server_key)
         self.assertEqual(401, self.exchange(ticket).status_code)
 
     def test_disconnect_before_delayed_issuance_fails_closed(self):
         proof=self.proof()
-        self.sso.disconnect(self.game_session,self.settings.minecraft_profile_key)
+        self.sso.disconnect(self.game_session,self.settings.terminal_sso_server_key)
         with self.assertRaises(ValueError):
-            self.sso.ticket(proof,self.account.uid,self.request_id,self.game_session,self.settings.minecraft_profile_key)
+            self.sso.ticket(proof,self.account.uid,self.request_id,self.game_session,self.settings.terminal_sso_server_key)
 
     def test_purpose_and_target_are_fixed(self):
         for field, value in (("target","/admin"),("purpose","other-login")):
