@@ -28,6 +28,7 @@ from .external_oauth import ExternalOAuthError, authorize_url as external_author
 from .security import OidcSigner, utc_now, token_hash
 from .store import Account, OAuthClient, Store
 from .terminal_sso import TerminalSsoStore, BOOTSTRAP_SECONDS, TICKET_SECONDS, TARGET
+from .terminal_server_auth import terminal_player
 
 
 WEB_ROOT = ROOT / "web"
@@ -206,22 +207,23 @@ def terminal_proof(payload: TerminalProofRequest, request: Request) -> JSONRespo
 def terminal_ticket(payload: TerminalTicketRequest, request: Request) -> JSONResponse:
     terminal_enabled()
     # The caller is a game server; the native account proof must independently match its player.
-    minecraft_player(payload.uid, request)
+    account = terminal_player(settings, store, payload.uid, request.headers.get("x-muxi-server-key", ""))
     try:
         ticket = terminal_sso.ticket(payload.proof, payload.uid, payload.requestId,
-                                     payload.gameSession, settings.minecraft_profile_key)
+                                     payload.gameSession, settings.terminal_sso_server_key)
     except ValueError:
         raise HTTPException(status_code=401, detail="Terminal authentication failed") from None
-    return JSONResponse({"ticket": ticket, "expiresInSeconds": TICKET_SECONDS},
+    return JSONResponse({"ticket": ticket, "expiresInSeconds": TICKET_SECONDS,
+                         "uid": account.uid, "requestId": payload.requestId, "gameSession": payload.gameSession},
                         headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/internal/minecraft/terminal-disconnect", include_in_schema=False)
 def terminal_disconnect(payload: TerminalDisconnectRequest, request: Request) -> JSONResponse:
     terminal_enabled()
-    minecraft_player(payload.uid, request)
+    terminal_player(settings, store, payload.uid, request.headers.get("x-muxi-server-key", ""))
     try:
-        terminal_sso.disconnect(payload.gameSession, settings.minecraft_profile_key)
+        terminal_sso.disconnect(payload.gameSession, settings.terminal_sso_server_key)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid terminal session") from None
     return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
