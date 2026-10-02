@@ -1,5 +1,33 @@
 # muxi 账户
 
+## Terminal platform SSO (not deployed)
+
+`MUXI_TERMINAL_SSO_ENABLED` defaults to `0`. The launcher exchanges its authenticated
+access token for a restricted game-process credential (maximum one hour, never
+longer than the originating access token remains valid). Native game code alone
+uses it over HTTPS to obtain a 30-second PKCE proof. The authenticated game server
+then exchanges that proof for a 30-second, single-use ticket bound to its specific
+game connection, account, request and fixed platform destination. A static game
+key and an arbitrary/offline UID are insufficient.
+
+`/api/internal/terminal/exchange` requires the existing confidential `better-mc-web`
+client and the PKCE verifier. It returns account claims directly to the platform,
+which creates `bmc_session`; it never sets `muxi_session` for this flow. The fixed
+destination is `https://mc.muxigame.com/account.html`. SQLite write transactions
+make proof/ticket consumption single-use across workers; only hashes are stored.
+
+Launcher logout, successful account replacement and game-process exit revoke the
+restricted credential and cascade-delete its proofs/tickets. Disconnect revokes
+pending tickets; a short tombstone also rejects issuance racing after disconnect.
+Originating-token revocation/expiration is checked again on issuance/redemption.
+When auth is unreachable, revocation is best-effort and expiry bounds validity;
+the new native/browser requests themselves fail back to ordinary platform login.
+An already established platform cookie follows normal platform logout/expiration
+semantics and is independent of game connection state, game bans and OP status.
+
+Enablement and rollout are separate approval steps. No production credentials,
+database, game permissions or live runtime configuration are changed here.
+
 muxigame 的独立统一账户服务。它同时提供账户官网、OAuth 2.0 Authorization Server 和 OpenID Connect Provider。
 
 ## 已实现
