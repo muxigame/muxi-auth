@@ -33,7 +33,7 @@ class TerminalSsoTests(unittest.TestCase):
         with self.store.connect() as db:
             db.execute("INSERT INTO access_tokens VALUES(?,?,?,?,?,?,NULL)",
                 (token_hash(self.access), account.id, self.client_id, "openid profile", iso(now), iso(now+timedelta(hours=2))))
-        self.settings = replace(main.settings, terminal_sso_enabled=True, issuer="https://account.muxigame.com", minecraft_profile_key="s"*32, terminal_sso_server_key="t"*32)
+        self.settings = replace(main.settings, terminal_sso_enabled=True, terminal_legacy_enabled=True, issuer="https://account.muxigame.com", minecraft_profile_key="s"*32, terminal_sso_server_key="t"*32)
         self.patches = [patch.object(main, "store", self.store), patch.object(main, "terminal_sso", self.sso), patch.object(main, "settings", self.settings)]
         for item in self.patches: item.start()
         self.client = TestClient(main.app, base_url=self.settings.issuer)

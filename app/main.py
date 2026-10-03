@@ -29,11 +29,14 @@ from .security import OidcSigner, utc_now, token_hash
 from .store import Account, OAuthClient, Store
 from .terminal_sso import TerminalSsoStore, BOOTSTRAP_SECONDS, TICKET_SECONDS, TARGET
 from .terminal_server_auth import terminal_player
+from .terminal_access import TerminalAccessStore
+from .terminal_access_api import terminal_access_router
 
 
 WEB_ROOT = ROOT / "web"
 store = Store(settings.database_path)
 terminal_sso = TerminalSsoStore(store)
+terminal_access = TerminalAccessStore(store)
 signer = OidcSigner(settings.signing_key_path)
 
 store.seed_client(
@@ -59,6 +62,7 @@ app = FastAPI(
     redoc_url=None,
 )
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.include_router(terminal_access_router(lambda: settings, lambda: store, lambda: terminal_access))
 
 
 @app.get("/healthz", include_in_schema=False)
@@ -149,6 +153,8 @@ def minecraft_join_mint(request: Request) -> JSONResponse:
 def terminal_enabled() -> None:
     if not settings.terminal_sso_enabled:
         raise HTTPException(status_code=404, detail="Terminal login is unavailable")
+    if not settings.terminal_legacy_enabled:
+        raise HTTPException(status_code=410, detail="Use the existing account access token")
 
 
 class TerminalProofRequest(BaseModel):
