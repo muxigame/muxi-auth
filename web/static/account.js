@@ -49,6 +49,7 @@
   // ── 渲染补充 ────────────────────────────────────────────────
   let user = null;
   let bindings = null;
+  const EXTERNAL = ['qq', 'wechat', 'microsoft', 'google'];
   const roles = { player: '玩家', user: '玩家', admin: '管理员', owner: '所有者' };
   const date = (value) => {
     if (!value) return '—';
@@ -128,7 +129,7 @@
   function renderMethods() {
     if (!user) return;
     const rows = [['email', user.email ? (user.verified ? '已验证' : '待验证') : '未绑定', user.email ? (user.verified ? 'ok' : 'warn') : '']];
-    for (const provider of ['qq', 'wechat']) {
+    for (const provider of EXTERNAL) {
       const b = bindings && bindings.bindings && bindings.bindings[provider];
       rows.push([provider, b ? (b.bound ? (b.nickname || '已绑定') : '未绑定') : '—', b && b.bound ? 'ok' : '']);
     }
@@ -148,12 +149,12 @@
   function renderChecks() {
     const list = byId('check-list');
     if (!list || !user) return;
-    const bound = bindings ? ['qq', 'wechat'].filter((p) => bindings.bindings && bindings.bindings[p] && bindings.bindings[p].bound).length : 0;
+    const bound = bindings ? EXTERNAL.filter((p) => bindings.bindings && bindings.bindings[p] && bindings.bindings[p].bound).length : 0;
     const methodCount = (user.email && user.verified ? 1 : 0) + bound;
     const p = profileOf(user);
     const checks = [
       { ok: !!(user.email && user.verified), title: '邮箱已验证', okText: '可以用邮箱登录和找回密码', todoText: user.email ? '验证邮件已发出，点击邮件里的链接完成绑定' : '绑定邮箱后才能找回账号', href: '#security', action: user.email ? '去验证' : '绑定邮箱' },
-      { ok: methodCount >= 2, title: '备用登录方式', okText: '丢失一种方式时仍能登录', todoText: '再绑定一种 QQ / 微信 / 邮箱', href: '#security', action: '去绑定' },
+      { ok: methodCount >= 2, title: '备用登录方式', okText: '丢失一种方式时仍能登录', todoText: '再绑定一种第三方账号或邮箱', href: '#security', action: '去绑定' },
       { ok: !!user.avatarUrl && !!p.bio, title: '完善资料', okText: '头像和个性签名都已设置', todoText: '设置头像和个性签名，让朋友更容易认出你', href: '#profile', action: '去完善' },
     ];
     list.replaceChildren(...checks.map((c) => {

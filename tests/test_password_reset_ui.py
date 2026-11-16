@@ -161,7 +161,7 @@ class PasswordResetPageTests(unittest.TestCase):
         page = Page("login.html")
         page.one("a", href="/forgot-password", **{"data-preserve-continue": None})
         self.assertIn("找回密码", page.source)
-        self.assertIn("?v=password-reset-20261104", page.one("script")["src"])
+        self.assertIn("?v=identity-20261116", page.one("script")["src"])
 
     def test_recovery_pages_only_use_same_origin_resources_and_private_metadata(self):
         for name in ("forgot-password.html", "reset-password.html"):

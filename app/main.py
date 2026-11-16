@@ -6,6 +6,7 @@ import os
 from urllib.request import Request as ServiceRequest, urlopen
 from urllib.parse import urlsplit as service_urlsplit
 import json
+import logging
 import re
 import smtplib
 from datetime import timedelta
@@ -24,7 +25,10 @@ from .config import ROOT, settings
 from .minecraft_identity import game_identity
 from . import avatar as avatar_rules
 from . import minecraft_join as join_grants
-from .external_oauth import ExternalOAuthError, authorize_url as external_authorize_url, exchange_profile, provider_status
+from .external_oauth import (CZL_PROVIDERS, PROVIDERS as EXTERNAL_PROVIDERS, ExternalIdentityUnclear, ExternalOAuthError,
+    authorize_url as external_authorize_url, exchange_profile, provider_status)
+
+LOG = logging.getLogger("muxi.external")
 from .security import OidcSigner, utc_now, token_hash
 from .store import Account, OAuthClient, Store
 from .terminal_sso import TerminalSsoStore, BOOTSTRAP_SECONDS, TICKET_SECONDS, TARGET
@@ -733,7 +737,7 @@ def complete_launcher_auth_flow(flow: str, secret: str = "") -> Response:
 
 @app.get("/external/{provider}/start")
 def external_start(provider: str, request: Request, continue_to: str = "/account") -> RedirectResponse:
-    if provider not in {"qq", "wechat"}:
+    if provider not in EXTERNAL_PROVIDERS:
         raise HTTPException(status_code=404, detail="不支持的第三方登录方式")
     safe_next = safe_continue(continue_to)
     state, verifier = store.create_external_state(provider, safe_next)
@@ -753,8 +757,23 @@ def external_czl_callback(
     code: str = "",
     error: str = "",
 ) -> RedirectResponse:
+    return finish_external(request, "czl", state, code, error)
+
+
+@app.get("/external/{route}/callback")
+def external_oidc_callback(
+    route: str,
+    request: Request,
+    state: str = "",
+    code: str = "",
+    error: str = "",
+) -> RedirectResponse:
+    return finish_external(request, route, state, code, error)
+
+
+def finish_external(request: Request, route: str, state: str, code: str, error: str) -> RedirectResponse:
     consumed = store.consume_external_state_context(state) if state else None
-    if consumed is None:
+    if consumed is None or route != ("czl" if consumed["provider"] in CZL_PROVIDERS else consumed["provider"]):
         return RedirectResponse("/login?external=invalid_state", status_code=303)
     provider, verifier, continue_to = consumed["provider"], consumed["code_verifier"], consumed["continue_to"]
     binding = consumed["purpose"] == "binding"
@@ -771,16 +790,22 @@ def external_czl_callback(
         )
     try:
         profile = exchange_profile(provider, code, verifier)
-    except ExternalOAuthError:
+    except ExternalOAuthError as failure:
+        reason = "unclear" if isinstance(failure, ExternalIdentityUnclear) else "unavailable"
+        LOG.warning("external %s %s failed (%s): %s", provider, consumed["purpose"], reason, failure)
         if binding:
-            return RedirectResponse("/account?binding=failed", status_code=303)
+            return RedirectResponse(f"/account?binding=failed&provider={provider}&reason={reason}", status_code=303)
         return RedirectResponse(
-            f"/login?external=failed&continue={quote(continue_to, safe='')}", status_code=303
+            f"/login?external=failed&provider={provider}&reason={reason}&continue={quote(continue_to, safe='')}", status_code=303
         )
 
     if binding:
-        ticket = store.prepare_external_binding(consumed, {"subject": profile.subject, "upstream_subject": profile.upstream_subject,
-            "nickname": profile.nickname, "raw_profile": profile.raw_profile})
+        try:
+            ticket = store.prepare_external_binding(consumed, {"subject": profile.subject, "upstream_subject": profile.upstream_subject,
+                "nickname": profile.nickname, "raw_profile": profile.raw_profile})
+        except ValueError as failure:
+            LOG.warning("external %s binding could not be prepared: %s", provider, failure)
+            return RedirectResponse(f"/account?binding=failed&provider={provider}&reason=unclear", status_code=303)
         response = RedirectResponse("/account?binding=confirm", status_code=303)
         response.set_cookie("muxi_binding_ticket", ticket, httponly=True, secure=settings.secure_cookies,
                             samesite="lax", max_age=600, path="/api/account/external")

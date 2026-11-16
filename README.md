@@ -102,11 +102,17 @@ CZL 的 Cookie 由浏览器在 CZL 域名下接收；不能在 muxi 后端抓取
 入口的长期兼容性。若 CZL 调整路由，可在服务器设置 `MUXI_CZL_DIRECT_UPSTREAM=0` 后
 重新创建容器，回退到常规授权入口，不需要更换 AppID 或改动 Better MC 客户端。
 
-## 账号页 QQ / 微信管理
+## Microsoft / Google 登录
+
+直接走 OpenID Connect（授权码 + PKCE），不经过 CZL。在 `/opt/muxi-auth/.env` 填 `MUXI_MICROSOFT_CLIENT_ID` / `MUXI_MICROSOFT_CLIENT_SECRET`（可选 `MUXI_MICROSOFT_TENANT`，默认 `common`）和 `MUXI_GOOGLE_CLIENT_ID` / `MUXI_GOOGLE_CLIENT_SECRET`，再通过 CI 发布让容器重新读取。没配齐的渠道在登录页和账号页都不显示。
+
+回调地址：`https://account.muxigame.com/external/microsoft/callback`、`https://account.muxigame.com/external/google/callback`。身份按提供方的 `sub` 记录（`microsoft:<sub>`、`google:<sub>`），不按邮箱自动合并已有账号；首次登录走和 QQ 一样的「完成 muxi 账户」页，已有账号在账号页绑定。
+
+## 账号页第三方账号管理
 
 账号页支持分别查看 QQ、微信绑定状态，补绑、解绑及换绑。开始操作须验证当前 muxi 密码；无密码账号须在重新登录后 10 分钟内操作。绑定/换绑通过 CZL 授权，返回原浏览器、原登录会话后展示待确认身份，确认成功才写入；取消、身份冲突或并发过期均不删除旧绑定。
 
-渠道按 CZL 已验证 userinfo 中的 `upstream_type` / `upstream_user_id` 等稳定标识区分；不能再用聚合 CZL 身份让已解绑渠道绕回原账号。一个第三方账号/关联 CZL 身份不能抢占另一个 muxi 账号，不自动合并存档。不能解绑最后一种可用登录方式；只有邮箱但没有密码不算可用的邮箱密码登录。
+渠道按 CZL 已验证 userinfo 中的 `upstream_type` / `upstream_user_id` 等稳定标识区分；不能再用聚合 CZL 身份让已解绑渠道绕回原账号。同一渠道的同一个第三方账号不能绑定两个 muxi 账号，不自动合并存档；冲突时提示对方账号的 UID。CZL 会把新登录的上游账号并入浏览器当前登录的 CZL 账号，所以同一个 CZL 账号下的 QQ 和微信允许分别绑定到不同的 muxi 账号（2026-11-16 起；此前会被误判为冲突，导致绑定 QQ 失败）。不能解绑最后一种可用登录方式；只有邮箱但没有密码不算可用的邮箱密码登录。
 
 变更后保留当前网页会话，撤销其他网页会话、OAuth access/refresh token 和未使用授权码。UID、昵称和游戏数据不变。新接口限定同源请求及自定义请求头；绑定 state、待确认票据均一次性、短时有效且绑定当前账号/会话。
 

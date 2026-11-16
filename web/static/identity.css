@@ -1,11 +1,60 @@
-/* 登录、注册、找回密码等身份页面。颜色全部来自 theme.css，浅色 / 深色跟随系统。 */
+/* 登录、注册、找回密码等身份页面：直角、无圆角，接近 Microsoft 账户登录页。
+   浅色 / 深色跟随系统（账户页可用 html[data-theme] 指定）。 */
+
+:root{
+  --id-bg:#f2f2f2;
+  --id-card:#ffffff;
+  --id-card-line:transparent;
+  --id-shadow:0 2px 6px rgba(0,0,0,.2);
+  --id-text:#1b1b1b;
+  --id-muted:#605e5c;
+  --id-faint:#8a8886;
+  --id-line:#e1dfdd;
+  --id-input-bg:#ffffff;
+  --id-input-hover:#ffffff;
+  --id-input-line:#8a8886;
+  --id-input-bottom:#605e5c;
+  --id-input-hover-line:#323130;
+  --id-focus:#0067b8;
+  --id-blue:#0067b8;
+  --id-blue-hover:#005da6;
+  --id-blue-active:#005394;
+  --id-link:#0067b8;
+  --id-tile:#ffffff;
+  --id-tile-hover:#f3f2f1;
+  --id-tile-line:#8a8886;
+  --id-info-bg:#eff6fc;
+  --id-info-bar:#0067b8;
+  --id-error-bg:#fde7e9;
+  --id-error-bar:#d13438;
+  --id-error-text:#a4262c;
+}
+
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --id-bg:#101010; --id-card:#1b1b1b; --id-card-line:#292929; --id-shadow:0 10px 34px rgba(0,0,0,.54);
+    --id-text:#f2f2f2; --id-muted:#b8b8b8; --id-faint:#8d8d8d; --id-line:#353535;
+    --id-input-bg:#242424; --id-input-hover:#292929; --id-input-line:#666; --id-input-bottom:#8a8a8a; --id-input-hover-line:#858585;
+    --id-focus:#4da3ff; --id-blue:#0078d4; --id-blue-hover:#1683d8; --id-blue-active:#006cbe; --id-link:#74b9ff;
+    --id-tile:#242424; --id-tile-hover:#2d2d2d; --id-tile-line:#575757;
+    --id-info-bg:#222f3d; --id-info-bar:#4da3ff; --id-error-bg:#351b1b; --id-error-bar:#f1707b; --id-error-text:#ffdadd;
+  }
+}
+:root[data-theme="dark"]{
+  --id-bg:#101010; --id-card:#1b1b1b; --id-card-line:#292929; --id-shadow:0 10px 34px rgba(0,0,0,.54);
+  --id-text:#f2f2f2; --id-muted:#b8b8b8; --id-faint:#8d8d8d; --id-line:#353535;
+  --id-input-bg:#242424; --id-input-hover:#292929; --id-input-line:#666; --id-input-bottom:#8a8a8a; --id-input-hover-line:#858585;
+  --id-focus:#4da3ff; --id-blue:#0078d4; --id-blue-hover:#1683d8; --id-blue-active:#006cbe; --id-link:#74b9ff;
+  --id-tile:#242424; --id-tile-hover:#2d2d2d; --id-tile-line:#575757;
+  --id-info-bg:#222f3d; --id-info-bar:#4da3ff; --id-error-bg:#351b1b; --id-error-bar:#f1707b; --id-error-text:#ffdadd;
+}
 
 .identity-body{
   margin:0;
   min-height:100vh;
-  background:var(--m-bg-subtle);
-  color:var(--m-text);
-  font-family:var(--m-font);
+  background:var(--id-bg);
+  color:var(--id-text);
+  font-family:"Segoe UI",SegoeUI,-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei UI","Helvetica Neue",Arial,sans-serif;
   display:flex;
   flex-direction:column;
 }
@@ -18,22 +67,23 @@
 }
 
 .identity-card{
+  box-sizing:border-box;
   width:min(440px,100%);
-  background:var(--m-surface);
-  border:1px solid var(--m-line);
-  border-radius:12px;
-  box-shadow:var(--m-shadow);
-  padding:40px 40px 36px;
+  background:var(--id-card);
+  border:1px solid var(--id-card-line);
+  border-radius:0;
+  box-shadow:var(--id-shadow);
+  padding:44px 44px 38px;
 }
 
 .identity-brand{
   display:inline-flex;
   align-items:center;
-  gap:10px;
+  gap:11px;
   margin-bottom:28px;
-  color:var(--m-text);
+  color:var(--id-text);
   text-decoration:none;
-  font-size:18px;
+  font-size:20px;
   font-weight:600;
   letter-spacing:-.01em;
 }
@@ -43,134 +93,149 @@
   height:24px;
   display:grid;
   place-items:center;
-  border-radius:6px;
-  background:var(--m-accent);
-  color:var(--m-on-accent);
-  font-size:13px;
+  background:var(--id-blue);
+  color:#fff;
+  font-size:14px;
   font-weight:700;
   line-height:1;
 }
 
 .identity-context{
   margin:0 0 8px;
-  color:var(--m-muted);
+  color:var(--id-muted);
   font-size:13px;
 }
 
 .identity-card h1{
   margin:0 0 8px;
-  font-size:26px;
+  font-size:28px;
   line-height:1.2;
   font-weight:600;
-  letter-spacing:-.01em;
+  letter-spacing:-.02em;
 }
 
 .identity-subtitle{
   margin:0 0 24px;
-  color:var(--m-muted);
+  color:var(--id-muted);
   font-size:14px;
-  line-height:1.5;
+  line-height:1.45;
 }
 
-.identity-form{display:grid;gap:16px}
-.identity-field{display:grid;gap:6px}
-.identity-field>span{font-size:13px;color:var(--m-text);font-weight:500}
-.identity-field small{font-size:12px;color:var(--m-faint);line-height:1.4}
+.identity-form{display:grid;gap:17px}
+.identity-field{display:grid;gap:7px}
+.identity-field>span{font-size:13px;color:var(--id-text)}
+.identity-field small{font-size:12px;color:var(--id-faint);line-height:1.4}
 
 .identity-field input{
   box-sizing:border-box;
   width:100%;
-  height:40px;
-  border:1px solid var(--m-input-line);
-  border-radius:8px;
-  background:var(--m-surface);
-  color:var(--m-text);
-  padding:0 12px;
-  font:15px var(--m-font);
+  height:42px;
+  border:1px solid var(--id-input-line);
+  border-bottom-color:var(--id-input-bottom);
+  border-radius:0;
+  background:var(--id-input-bg);
+  color:var(--id-text);
+  padding:8px 10px;
+  font:15px "Segoe UI",SegoeUI,-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei UI",Arial,sans-serif;
   outline:none;
-  transition:border-color .12s,box-shadow .12s;
+  box-shadow:none;
+  transition:border-color .12s,background .12s;
 }
 
-.identity-field input:hover{border-color:var(--m-line-strong)}
-.identity-field input:focus{border-color:var(--m-accent);box-shadow:0 0 0 3px var(--m-info-bg)}
+.identity-field input:hover{background:var(--id-input-hover);border-color:var(--id-input-hover-line)}
+.identity-field input:focus{border-color:var(--id-input-hover-line);border-bottom:2px solid var(--id-focus);padding-bottom:7px}
 
 .identity-inline-help{
   margin-top:-2px;
-  color:var(--m-muted);
+  color:var(--id-muted);
   font-size:13px;
 }
 
-.identity-inline-help a{color:var(--m-link);text-decoration:none}
+.identity-inline-help a{color:var(--id-link);text-decoration:none}
 .identity-inline-help a:hover{text-decoration:underline}
 
 .identity-actions{
   display:flex;
   justify-content:flex-end;
-  margin-top:6px;
+  margin-top:7px;
 }
 
 .identity-primary{
-  min-width:104px;
-  height:38px;
+  min-width:108px;
+  height:40px;
   border:0;
-  border-radius:8px;
-  background:var(--m-accent);
-  color:var(--m-on-accent);
-  padding:0 20px;
-  font:600 14px var(--m-font);
+  border-radius:0;
+  background:var(--id-blue);
+  color:#fff;
+  padding:0 22px;
+  font:600 14px "Segoe UI",SegoeUI,-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei UI",Arial,sans-serif;
   cursor:pointer;
 }
 
-.identity-primary:hover{background:var(--m-accent-hover)}
-.identity-primary:focus-visible{outline:2px solid var(--m-focus);outline-offset:2px}
+.identity-primary:hover{background:var(--id-blue-hover)}
+.identity-primary:active{background:var(--id-blue-active)}
+.identity-primary:focus-visible{outline:2px solid var(--id-text);outline-offset:2px}
 .identity-primary:disabled{opacity:.55;cursor:wait}
 
 .identity-divider{
   display:flex;
   align-items:center;
   gap:12px;
-  margin:24px 0 16px;
-  color:var(--m-faint);
+  margin:26px 0 16px;
+  color:var(--id-faint);
   font-size:12px;
 }
 
-.identity-divider::before,.identity-divider::after{
+.identity-divider::before,
+.identity-divider::after{
   content:"";
   height:1px;
   flex:1;
-  background:var(--m-line);
+  background:var(--id-line);
 }
 
-.identity-social{display:grid;gap:10px}
-.identity-social-button{
-  height:40px;
+/* 第三方登录：一排方形图标按钮。 */
+.identity-social{
   display:flex;
-  align-items:center;
+  flex-wrap:wrap;
   justify-content:center;
-  border:1px solid var(--m-line-strong);
-  border-radius:8px;
-  color:var(--m-text);
-  background:var(--m-surface);
-  text-decoration:none;
-  font-size:14px;
-  font-weight:500;
+  gap:12px;
 }
-.identity-social-button:hover{background:var(--m-hover)}
-.identity-social-button[aria-disabled="true"]{opacity:.48;cursor:not-allowed}
+.identity-social-button{
+  box-sizing:border-box;
+  width:48px;
+  height:48px;
+  display:grid;
+  place-items:center;
+  border:1px solid var(--id-tile-line);
+  border-radius:0;
+  background:var(--id-tile);
+  color:var(--id-text);
+  text-decoration:none;
+  transition:background .12s,border-color .12s;
+}
+.identity-social-button svg{width:24px;height:24px;display:block}
+.identity-social-button:hover{background:var(--id-tile-hover);border-color:var(--id-input-hover-line)}
+.identity-social-button:focus-visible{outline:2px solid var(--id-focus);outline-offset:2px}
+.identity-social-button[aria-disabled="true"]{opacity:.45;cursor:not-allowed}
+.identity-social-button[data-provider="qq"]{color:#12b7f5}
+.identity-social-button[data-provider="wechat"]{color:#07c160}
 
 .identity-message{
   margin:0 0 18px;
-  padding:10px 12px;
-  border-radius:8px;
-  background:var(--m-info-bg);
-  color:var(--m-text);
+  padding:11px 12px;
+  border-radius:0;
+  background:var(--id-info-bg);
+  border-left:3px solid var(--id-info-bar);
+  color:var(--id-text);
   font-size:13px;
-  line-height:1.5;
+  line-height:1.45;
 }
 
 .identity-message.error{
-  background:var(--m-danger-bg);
-  color:var(--m-danger);
+  background:var(--id-error-bg);
+  border-left-color:var(--id-error-bar);
+  color:var(--id-error-text);
 }
 
 .identity-footer{
@@ -178,13 +243,13 @@
   justify-content:center;
   gap:24px;
   padding:0 20px 22px;
-  color:var(--m-faint);
+  color:var(--id-faint);
   font-size:11px;
 }
 
 @media(max-width:520px){
-  .identity-stage{padding:0;background:var(--m-surface);place-items:stretch}
-  .identity-card{width:100%;min-height:100vh;border:0;border-radius:0;box-shadow:none;padding:36px 24px}
+  .identity-stage{padding:0;background:var(--id-card);place-items:stretch}
+  .identity-card{width:100%;min-height:100vh;border:0;box-shadow:none;padding:38px 28px}
   .identity-footer{display:none}
 }
 
@@ -193,13 +258,13 @@
 .identity-done { text-align: center; padding: 8px 0 4px; }
 .identity-done-mark {
   width: 56px; height: 56px; margin: 0 auto 18px;
-  display: grid; place-items: center; border-radius: 50%;
-  background: var(--m-info-bg);
-  font-size: 26px; color: var(--m-accent);
+  display: grid; place-items: center;
+  background: var(--id-info-bg); border: 1px solid var(--id-blue);
+  font-size: 26px; color: var(--id-blue);
 }
 .identity-done h2 { margin: 0 0 10px; font-size: 21px; font-weight: 600; }
-.identity-done p { margin: 0 0 8px; color: var(--m-muted); font-size: 14px; line-height: 1.7; }
-.identity-done p b { color: var(--m-text); word-break: break-all; }
+.identity-done p { margin: 0 0 8px; color: var(--id-muted); font-size: 14px; line-height: 1.7; }
+.identity-done p b { color: var(--id-text); word-break: break-all; }
 .identity-done-hint { font-size: 13px; }
 .identity-done .identity-actions {
   margin-top: 22px; display: grid; gap: 10px;
@@ -207,11 +272,11 @@
 }
 .identity-secondary {
   height: 40px; display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--m-line-strong); border-radius: 8px;
-  background: transparent; color: var(--m-text);
+  border: 1px solid var(--id-tile-line); border-radius: 0;
+  background: transparent; color: var(--id-text);
   font: inherit; font-size: 14px; text-decoration: none; cursor: pointer;
 }
-.identity-secondary:hover { background: var(--m-hover); }
+.identity-secondary:hover { background: var(--id-tile-hover); }
 
 /* 任何设了 display 的类都会盖过 hidden 属性自带的 display:none。
    .identity-form 就是这么让「注册完成后藏掉表单」失效的：JS 设了 hidden，

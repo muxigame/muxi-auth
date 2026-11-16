@@ -164,6 +164,9 @@ function wireAuthContext() {
   });
 }
 
+const PROVIDER_NAMES = { qq: 'QQ', wechat: '微信', microsoft: 'Microsoft', google: 'Google' };
+const providerName = (provider) => PROVIDER_NAMES[provider] || provider;
+
 async function wireExternalProviders() {
   const buttons = [...document.querySelectorAll('[data-provider]')];
   if (!buttons.length) return;
@@ -171,22 +174,27 @@ async function wireExternalProviders() {
   try {
     providers = (await api('/api/external/providers')).providers || {};
   } catch {}
+  let shown = 0;
   for (const button of buttons) {
     const provider = button.dataset.provider;
     const enabled = !!providers[provider];
+    // Unconfigured sign-in methods are hidden rather than shown as dead icons.
+    button.hidden = !enabled;
     button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
-    if (enabled) {
-      button.href = `/external/${provider}/start?continue_to=${continueQuery()}`;
-      button.addEventListener('click', markLauncherFlowLeaving);
-    } else {
-      button.href = '#';
-      button.title = '管理员尚未配置该第三方登录方式';
-      button.addEventListener('click', (event) => {
-        event.preventDefault();
-        showMessage(`${provider === 'qq' ? 'QQ' : '微信'} 登录尚未配置`, true);
-      });
-    }
+    if (!enabled) continue;
+    shown += 1;
+    button.href = `/external/${provider}/start?continue_to=${continueQuery()}`;
+    button.addEventListener('click', markLauncherFlowLeaving);
   }
+  document.querySelectorAll('[data-social]').forEach((el) => { el.hidden = shown === 0; });
+}
+
+function externalFailure(params) {
+  const name = providerName(params.get('provider') || '');
+  if (params.get('reason') === 'unclear') {
+    return `没能确认你用的是哪个${name}账号。可能是 CZL 里同时关联了多个${name}，请在 CZL 账号设置里只保留一个后重试。`;
+  }
+  return name ? `${name} 授权没有完成，请重试。` : '第三方登录没有完成，请重试。';
 }
 
 let account = null;
@@ -214,8 +222,9 @@ async function loadBindings() {
       ? '历史授权尚未识别具体渠道，请先用原 QQ / 微信重新登录后操作。'
       : info.requiresPassword ? '操作前请填写当前 muxi 账号密码。' : '无密码账号请在重新登录后 10 分钟内操作；不能解绑最后一种登录方式。';
     $('binding-rows').replaceChildren();
-    for (const [provider, name] of [['qq', 'QQ'], ['wechat', '微信']]) {
+    for (const [provider, name] of Object.entries(PROVIDER_NAMES)) {
       const binding = info.bindings[provider];
+      if (!binding || (!binding.bound && !info.providers[provider])) continue;
       const row = document.createElement('div');
       row.className = 'binding-row';
       const label = document.createElement('p');
@@ -239,7 +248,7 @@ async function loadBindings() {
     const { pending } = await api('/api/account/external/pending');
     $('binding-confirmation').hidden = !pending;
     if (pending) {
-      $('binding-preview').textContent = `${pending.replacing ? '换绑' : '绑定'} ${pending.provider === 'qq' ? 'QQ' : '微信'}：${pending.nickname || '未提供昵称'}（身份标记 ${pending.identityHint}）。确认后关联到当前 muxi 账号。`;
+      $('binding-preview').textContent = `${pending.replacing ? '换绑' : '绑定'} ${providerName(pending.provider)}：${pending.nickname || '未提供昵称'}（身份标记 ${pending.identityHint}）。确认后关联到当前 muxi 账号。`;
       $('binding-confirm').textContent = pending.replacing ? '确认换绑' : '确认绑定';
     }
   } catch (error) {
@@ -291,7 +300,8 @@ if ($('binding-rows')) {
   $('binding-confirm').onclick = () => finishBinding('confirm');
   $('binding-cancel').onclick = () => finishBinding('cancel');
   const status = new URLSearchParams(location.search).get('binding');
-  const messages = { cancelled: '授权已取消，原绑定不变。', failed: '未能验证第三方身份，原绑定不变，请重新授权。', session_changed: '登录账号或会话已变化，本次绑定未生效，请重新发起。' };
+  const params = new URLSearchParams(location.search);
+  const messages = { cancelled: '授权已取消，原绑定不变。', failed: `${externalFailure(params)}原绑定不变。`, session_changed: '登录账号或会话已变化，本次绑定未生效，请重新发起。' };
   if (messages[status]) showMessage(messages[status], status !== 'cancelled');
 }
 
@@ -450,7 +460,7 @@ if ($('login-form')) {
       verified !== '1',
     );
   }
-  if (params.get('external')) showMessage('第三方登录没有完成，请重试。', true);
+  if (params.get('external')) showMessage(externalFailure(params), true);
   wireAuthContext();
   wireExternalProviders();
 }
@@ -548,7 +558,7 @@ if ($('external-complete-form')) {
   (async () => {
     try {
       const signup = await api(`/api/external/signup?ticket=${encodeURIComponent(ticket)}`);
-      $('external-provider').textContent = signup.provider === 'qq' ? 'QQ 账户' : '微信账户';
+      $('external-provider').textContent = `${providerName(signup.provider)} 账户`;
       $('external-nickname').value = signup.nickname || '';
       if (signup.continue) resumeLauncherFlow(signup.continue);
     } catch (error) {

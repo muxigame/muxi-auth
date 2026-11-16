@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 from .security import hash_password, needs_rehash, pkce_s256, random_token, token_hash, utc_now, verify_password
 from .external_identity import upstream_subject as verified_upstream_subject
+from .external_oauth import PROVIDER_NAMES, PROVIDERS as CHANNELS
 from . import profile_fields
 
 
@@ -335,7 +336,10 @@ class Store:
                     if name not in columns:
                         db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
             self._migrate_external_channels(db)
-            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS external_account_channel ON external_identities(account_id,provider) WHERE provider IN ('qq','wechat')")
+            # One identity per sign-in channel per account. Unrecognised historical
+            # 'czl' rows are the only exception.
+            db.execute("DROP INDEX IF EXISTS external_account_channel")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS external_account_channel_v2 ON external_identities(account_id,provider) WHERE provider<>'czl'")
 
     @staticmethod
     def _migrate_external_channels(db) -> None:
@@ -362,7 +366,7 @@ class Store:
         return {"requiresPassword": bool(password and password[0]),
                 "legacy": any(r["provider"] == "czl" for r in rows),
                 "bindings": {p: {"bound": any(r["provider"] == p for r in rows),
-                    "nickname": next((r["provider_nickname"] for r in rows if r["provider"] == p), None)} for p in ("qq", "wechat")}}
+                    "nickname": next((r["provider_nickname"] for r in rows if r["provider"] == p), None)} for p in CHANNELS}}
 
     def authorize_binding_change(self, account_id: int, session: str, password: str) -> None:
         with self.connect() as db:
@@ -378,7 +382,7 @@ class Store:
 
     @staticmethod
     def _binding_slot(db, account_id, provider):
-        if provider not in ("qq", "wechat"):
+        if provider not in CHANNELS:
             raise ValueError("不支持的绑定渠道")
         if db.execute("SELECT 1 FROM external_identities WHERE account_id=? AND provider='czl'", (account_id,)).fetchone():
             raise ValueError("历史第三方授权尚未识别渠道，请先通过原 QQ/微信重新登录")
@@ -437,13 +441,15 @@ class Store:
             if (int(old["id"]) if old else None) != row["expected_id"]:
                 raise ValueError("绑定状态已变化，请刷新后重试")
             profile = json.loads(row["profile"])
-            conflict = db.execute("""SELECT 1 FROM external_identities WHERE account_id<>? AND
-                (provider_subject=? OR (provider=? AND upstream_subject=?))""",
-                (account_id, profile["subject"], row["provider"], profile["upstream_subject"])).fetchone()
+            name = PROVIDER_NAMES.get(row["provider"], row["provider"])
+            conflict = db.execute("""SELECT a.uid FROM external_identities x JOIN accounts a ON a.id=x.account_id
+                WHERE x.account_id<>? AND x.provider=? AND (x.provider_subject=? OR x.upstream_subject=?)""",
+                (account_id, row["provider"], profile["subject"], profile["upstream_subject"])).fetchone()
             if conflict:
-                raise ValueError("该第三方账号或关联的 CZL 身份已绑定其他 muxi 账号，不能合并或转移")
+                raise ValueError(f"这个{name}已绑定其他 muxi 账号（UID {conflict['uid']}）。请先用它登录那个账号并解绑，"
+                                 "再回来绑定；两个账号不会自动合并。")
             if old and old["upstream_subject"] == profile["upstream_subject"]:
-                raise ValueError("选择的仍是原第三方账号，请在授权页面切换账号")
+                raise ValueError(f"授权的仍是原来的{name}账号。请先在{name}里退出或切换到新账号，再点换绑。")
             if old:
                 db.execute("DELETE FROM external_identities WHERE id=?", (old["id"],))
             db.execute("""INSERT INTO external_identities
@@ -462,11 +468,11 @@ class Store:
             row = self._binding_slot(db, account_id, provider)
             if not row:
                 raise ValueError("该渠道尚未绑定")
-            alternative = db.execute("SELECT 1 FROM external_identities WHERE account_id=? AND provider IN ('qq','wechat') AND provider<>?", (account_id, provider)).fetchone()
+            alternative = db.execute("SELECT 1 FROM external_identities WHERE account_id=? AND provider<>'czl' AND provider<>?", (account_id, provider)).fetchone()
             password_login = db.execute("""SELECT 1 FROM accounts a JOIN account_emails e ON e.account_id=a.id
                 WHERE a.id=? AND a.password_hash IS NOT NULL AND e.verified=1 AND e.is_primary=1""", (account_id,)).fetchone()
             if not alternative and not password_login:
-                raise ValueError("不能解绑最后一种可用登录方式；请先绑定另一渠道，或使用换绑")
+                raise ValueError("不能解绑最后一种可用登录方式；请先绑定另一种登录方式，或使用换绑")
             db.execute("DELETE FROM external_identities WHERE id=?", (row["id"],))
             db.execute("INSERT INTO external_binding_events(account_id,provider,action,created_at) VALUES(?,?,?,?)", (account_id, provider, "unlink", iso(utc_now())))
             self._invalidate_binding_sessions(db, account_id, token_hash(session))

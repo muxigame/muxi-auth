@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>账户 · muxi 账户</title>
-  <script src="/static/theme.js?v=account-20261115"></script>
-  <link rel="stylesheet" href="/static/theme.css?v=account-20261115">
-  <link rel="stylesheet" href="/static/identity.css?v=account-20261115">
-  <link rel="stylesheet" href="/static/account.css?v=account-20261115">
+  <script src="/static/theme.js?v=account-20261116"></script>
+  <link rel="stylesheet" href="/static/theme.css?v=account-20261116">
+  <link rel="stylesheet" href="/static/identity.css?v=account-20261116">
+  <link rel="stylesheet" href="/static/account.css?v=account-20261116">
 </head>
 <body class="acct-body">
   <header class="acct-top">
@@ -128,6 +128,16 @@
               <div class="row-text"><div class="row-title">微信</div><div class="row-desc">用微信授权登录</div></div>
               <span class="pill" id="method-wechat">—</span>
             </div>
+            <div class="row method" data-method="microsoft">
+              <span class="method-badge" aria-hidden="true">M</span>
+              <div class="row-text"><div class="row-title">Microsoft</div><div class="row-desc">用 Microsoft 账户登录</div></div>
+              <span class="pill" id="method-microsoft">—</span>
+            </div>
+            <div class="row method" data-method="google">
+              <span class="method-badge" aria-hidden="true">G</span>
+              <div class="row-text"><div class="row-title">Google</div><div class="row-desc">用 Google 账号登录</div></div>
+              <span class="pill" id="method-google">—</span>
+            </div>
           </div>
         </section>
       </section>
@@ -243,20 +253,20 @@
 
         <section class="section" id="external-bindings-panel" aria-labelledby="bindings-title">
           <div class="section-head">
-            <h2 id="bindings-title">QQ / 微信</h2>
+            <h2 id="bindings-title">第三方账号</h2>
             <p>换绑成功前保留旧绑定。绑定变更会让其他设备重新登录，UID 和游戏存档不变。</p>
           </div>
           <div class="group">
             <div class="row"><p id="binding-status" class="row-desc" role="status">正在读取绑定状态…</p></div>
             <label class="row row-field" id="binding-password-field" hidden>
-              <div class="row-text"><div class="row-title">当前 muxi 账号密码</div><div class="row-desc">不是 QQ / 微信密码</div></div>
+              <div class="row-text"><div class="row-title">当前 muxi 账号密码</div><div class="row-desc">不是第三方账号的密码</div></div>
               <input id="binding-password" type="password" autocomplete="current-password" maxlength="128">
             </label>
             <div id="binding-rows" class="binding-list"></div>
             <div id="binding-confirmation" class="row row-stack" hidden>
               <div class="row-title">确认本次授权</div>
               <p id="binding-preview" class="row-desc"></p>
-              <p class="row-desc">请确认刚才授权的是你想绑定的账号。换绑时请在 QQ / 微信授权页面切换到新账号，不要直接复用原账号。</p>
+              <p class="row-desc">请确认刚才授权的是你想绑定的账号。换绑时请在授权页面切换到新账号；QQ 会自动沿用客户端里登录的账号，换绑前先在 QQ 里切换。</p>
               <div class="row-control">
                 <button id="binding-confirm" type="button" class="acct-btn acct-btn-primary">确认绑定</button>
                 <button id="binding-cancel" type="button" class="acct-btn">取消，保留原绑定</button>
@@ -324,7 +334,7 @@
     </main>
   </div>
 
-  <script src="/static/app.js?v=account-20261115" defer></script>
-  <script src="/static/account.js?v=account-20261115" defer></script>
+  <script src="/static/app.js?v=account-20261116" defer></script>
+  <script src="/static/account.js?v=account-20261116" defer></script>
 </body>
 </html>

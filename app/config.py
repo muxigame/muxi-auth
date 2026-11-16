@@ -88,6 +88,15 @@ class Settings:
     # Set to 0 to fall back to the documented OAuth authorization entry.
     czl_direct_upstream: bool = os.getenv("MUXI_CZL_DIRECT_UPSTREAM", "1").strip() == "1"
 
+    # Microsoft / Google sign-in (direct OpenID Connect). Each stays hidden until
+    # both its values are set. Redirect URI: {issuer}/external/<provider>/callback
+    microsoft_client_id: str = os.getenv("MUXI_MICROSOFT_CLIENT_ID", "")
+    microsoft_client_secret: str = field(default=os.getenv("MUXI_MICROSOFT_CLIENT_SECRET", ""), repr=False)
+    # common = personal and work/school accounts; consumers = personal only.
+    microsoft_tenant: str = os.getenv("MUXI_MICROSOFT_TENANT", "common")
+    google_client_id: str = os.getenv("MUXI_GOOGLE_CLIENT_ID", "")
+    google_client_secret: str = field(default=os.getenv("MUXI_GOOGLE_CLIENT_SECRET", ""), repr=False)
+
     @property
     def secure_cookies(self) -> bool:
         return self.issuer.lower().startswith("https://")
@@ -95,6 +104,9 @@ class Settings:
     @property
     def czl_redirect_uri(self) -> str:
         return f"{self.issuer}/external/czl/callback"
+
+    def external_redirect_uri(self, provider: str) -> str:
+        return f"{self.issuer}/external/{provider}/callback"
 
 
 settings = Settings()
