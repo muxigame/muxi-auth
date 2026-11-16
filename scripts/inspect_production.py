@@ -129,3 +129,20 @@ if info:
 
 section("tools")
 print(run("bash", "-c", "python3 --version; docker --version; docker compose version; command -v sqlite3; df -h /opt | tail -1"))
+
+section("bindings")
+if info:
+    print(run("docker", "exec", CONTAINER, "python", "-B", "-c", Path(__file__).with_name("inspect_bindings.py").read_text("utf-8")))
+
+section("binding requests in container log (path and status only)")
+LINE = re.compile(r'"(GET|POST) (/external/[^ ?]*|/api/account/external[^ ?]*|/api/external/[^ ?]*)\S* HTTP/[\d.]+" (\d{3})')
+logs = subprocess.run(["docker", "logs", CONTAINER], capture_output=True, text=True, timeout=60, check=False)
+counts: dict = {}
+for match in LINE.finditer(logs.stdout + logs.stderr):
+    counts[match.groups()] = counts.get(match.groups(), 0) + 1
+for key, value in sorted(counts.items()):
+    print(" ", *key, value)
+errors = [l for l in (logs.stdout + logs.stderr).splitlines() if re.search(r"Traceback|Error|Exception", l)]
+print("error-looking lines:", len(errors))
+for l in sorted({re.sub(r"[0-9a-f]{8,}|\d+", "#", l.strip())[:160] for l in errors})[:30]:
+    print("  ", l)
