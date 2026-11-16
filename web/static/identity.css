@@ -1,20 +1,11 @@
-:root{
-  color-scheme: dark;
-  --identity-bg:#101010;
-  --identity-card:#1b1b1b;
-  --identity-line:#3b3b3b;
-  --identity-text:#f2f2f2;
-  --identity-muted:#b8b8b8;
-  --identity-blue:#0078d4;
-  --identity-blue-hover:#1683d8;
-}
+/* 登录、注册、找回密码等身份页面。颜色全部来自 theme.css，浅色 / 深色跟随系统。 */
 
 .identity-body{
   margin:0;
   min-height:100vh;
-  background:var(--identity-bg);
-  color:var(--identity-text);
-  font-family:"Segoe UI",SegoeUI,"Helvetica Neue",Arial,sans-serif;
+  background:var(--m-bg-subtle);
+  color:var(--m-text);
+  font-family:var(--m-font);
   display:flex;
   flex-direction:column;
 }
@@ -24,25 +15,25 @@
   display:grid;
   place-items:center;
   padding:56px 22px 32px;
-  background:radial-gradient(circle at 50% 42%,rgba(80,80,80,.13),transparent 42%);
 }
 
 .identity-card{
   width:min(440px,100%);
-  background:var(--identity-card);
-  border:1px solid #292929;
-  box-shadow:0 10px 34px rgba(0,0,0,.54);
-  padding:44px 44px 38px;
+  background:var(--m-surface);
+  border:1px solid var(--m-line);
+  border-radius:12px;
+  box-shadow:var(--m-shadow);
+  padding:40px 40px 36px;
 }
 
 .identity-brand{
   display:inline-flex;
   align-items:center;
-  gap:11px;
+  gap:10px;
   margin-bottom:28px;
-  color:#f7f7f7;
+  color:var(--m-text);
   text-decoration:none;
-  font-size:20px;
+  font-size:18px;
   font-weight:600;
   letter-spacing:-.01em;
 }
@@ -52,93 +43,94 @@
   height:24px;
   display:grid;
   place-items:center;
-  background:var(--identity-blue);
-  color:#fff;
-  font-size:14px;
+  border-radius:6px;
+  background:var(--m-accent);
+  color:var(--m-on-accent);
+  font-size:13px;
   font-weight:700;
   line-height:1;
 }
 
 .identity-context{
   margin:0 0 8px;
-  color:#a6a6a6;
+  color:var(--m-muted);
   font-size:13px;
 }
 
 .identity-card h1{
   margin:0 0 8px;
-  font-size:28px;
+  font-size:26px;
   line-height:1.2;
   font-weight:600;
-  letter-spacing:-.02em;
+  letter-spacing:-.01em;
 }
 
 .identity-subtitle{
   margin:0 0 24px;
-  color:#c9c9c9;
+  color:var(--m-muted);
   font-size:14px;
-  line-height:1.45;
+  line-height:1.5;
 }
 
-.identity-form{display:grid;gap:17px}
-.identity-field{display:grid;gap:7px}
-.identity-field>span{font-size:13px;color:#e2e2e2}
-.identity-field small{font-size:12px;color:#989898;line-height:1.4}
+.identity-form{display:grid;gap:16px}
+.identity-field{display:grid;gap:6px}
+.identity-field>span{font-size:13px;color:var(--m-text);font-weight:500}
+.identity-field small{font-size:12px;color:var(--m-faint);line-height:1.4}
 
 .identity-field input{
+  box-sizing:border-box;
   width:100%;
-  height:42px;
-  border:1px solid #666;
-  border-bottom-color:#8a8a8a;
-  border-radius:0;
-  background:#242424;
-  color:#fff;
-  padding:8px 10px;
-  font:15px "Segoe UI",SegoeUI,"Helvetica Neue",Arial,sans-serif;
+  height:40px;
+  border:1px solid var(--m-input-line);
+  border-radius:8px;
+  background:var(--m-surface);
+  color:var(--m-text);
+  padding:0 12px;
+  font:15px var(--m-font);
   outline:none;
-  transition:border-color .12s,background .12s;
+  transition:border-color .12s,box-shadow .12s;
 }
 
-.identity-field input:hover{background:#292929;border-color:#858585}
-.identity-field input:focus{background:#202020;border-color:#858585;border-bottom:2px solid #4da3ff}
+.identity-field input:hover{border-color:var(--m-line-strong)}
+.identity-field input:focus{border-color:var(--m-accent);box-shadow:0 0 0 3px var(--m-info-bg)}
 
 .identity-inline-help{
   margin-top:-2px;
-  color:#c3c3c3;
+  color:var(--m-muted);
   font-size:13px;
 }
 
-.identity-inline-help a{color:#74b9ff;text-decoration:none}
+.identity-inline-help a{color:var(--m-link);text-decoration:none}
 .identity-inline-help a:hover{text-decoration:underline}
 
 .identity-actions{
   display:flex;
   justify-content:flex-end;
-  margin-top:7px;
+  margin-top:6px;
 }
 
 .identity-primary{
-  min-width:108px;
-  height:40px;
+  min-width:104px;
+  height:38px;
   border:0;
-  border-radius:0;
-  background:var(--identity-blue);
-  color:#fff;
-  padding:0 22px;
-  font:600 14px "Segoe UI",SegoeUI,"Helvetica Neue",Arial,sans-serif;
+  border-radius:8px;
+  background:var(--m-accent);
+  color:var(--m-on-accent);
+  padding:0 20px;
+  font:600 14px var(--m-font);
   cursor:pointer;
 }
 
-.identity-primary:hover{background:var(--identity-blue-hover)}
-.identity-primary:active{background:#006cbe}
-.identity-primary:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.identity-primary:hover{background:var(--m-accent-hover)}
+.identity-primary:focus-visible{outline:2px solid var(--m-focus);outline-offset:2px}
+.identity-primary:disabled{opacity:.55;cursor:wait}
 
 .identity-divider{
   display:flex;
   align-items:center;
   gap:12px;
   margin:24px 0 16px;
-  color:#8d8d8d;
+  color:var(--m-faint);
   font-size:12px;
 }
 
@@ -146,39 +138,39 @@
   content:"";
   height:1px;
   flex:1;
-  background:#353535;
+  background:var(--m-line);
 }
 
 .identity-social{display:grid;gap:10px}
 .identity-social-button{
-  height:42px;
+  height:40px;
   display:flex;
   align-items:center;
   justify-content:center;
-  border:1px solid #575757;
-  color:#f1f1f1;
-  background:#242424;
+  border:1px solid var(--m-line-strong);
+  border-radius:8px;
+  color:var(--m-text);
+  background:var(--m-surface);
   text-decoration:none;
   font-size:14px;
   font-weight:500;
 }
-.identity-social-button:hover{background:#2d2d2d;border-color:#777}
+.identity-social-button:hover{background:var(--m-hover)}
 .identity-social-button[aria-disabled="true"]{opacity:.48;cursor:not-allowed}
 
 .identity-message{
   margin:0 0 18px;
-  padding:11px 12px;
-  background:#222f3d;
-  border-left:3px solid #4da3ff;
-  color:#e6f1ff;
+  padding:10px 12px;
+  border-radius:8px;
+  background:var(--m-info-bg);
+  color:var(--m-text);
   font-size:13px;
-  line-height:1.45;
+  line-height:1.5;
 }
 
 .identity-message.error{
-  background:#351b1b;
-  border-left-color:#f1707b;
-  color:#ffdadd;
+  background:var(--m-danger-bg);
+  color:var(--m-danger);
 }
 
 .identity-footer{
@@ -186,13 +178,13 @@
   justify-content:center;
   gap:24px;
   padding:0 20px 22px;
-  color:#7e7e7e;
+  color:var(--m-faint);
   font-size:11px;
 }
 
 @media(max-width:520px){
-  .identity-stage{padding:0;background:var(--identity-card);place-items:stretch}
-  .identity-card{width:100%;min-height:100vh;border:0;box-shadow:none;padding:38px 28px}
+  .identity-stage{padding:0;background:var(--m-surface);place-items:stretch}
+  .identity-card{width:100%;min-height:100vh;border:0;border-radius:0;box-shadow:none;padding:36px 24px}
   .identity-footer{display:none}
 }
 
@@ -202,24 +194,24 @@
 .identity-done-mark {
   width: 56px; height: 56px; margin: 0 auto 18px;
   display: grid; place-items: center; border-radius: 50%;
-  background: rgba(0, 120, 212, .14); border: 1px solid var(--identity-blue);
-  font-size: 26px; color: #8fc4f5;
+  background: var(--m-info-bg);
+  font-size: 26px; color: var(--m-accent);
 }
 .identity-done h2 { margin: 0 0 10px; font-size: 21px; font-weight: 600; }
-.identity-done p { margin: 0 0 8px; color: var(--identity-muted); font-size: 14px; line-height: 1.7; }
-.identity-done p b { color: var(--identity-text); word-break: break-all; }
+.identity-done p { margin: 0 0 8px; color: var(--m-muted); font-size: 14px; line-height: 1.7; }
+.identity-done p b { color: var(--m-text); word-break: break-all; }
 .identity-done-hint { font-size: 13px; }
 .identity-done .identity-actions {
   margin-top: 22px; display: grid; gap: 10px;
   grid-template-columns: 1fr; justify-content: stretch;
 }
 .identity-secondary {
-  height: 42px; display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--identity-line); border-radius: 4px;
-  background: transparent; color: var(--identity-text);
+  height: 40px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--m-line-strong); border-radius: 8px;
+  background: transparent; color: var(--m-text);
   font: inherit; font-size: 14px; text-decoration: none; cursor: pointer;
 }
-.identity-secondary:hover { border-color: #5a5a5a; }
+.identity-secondary:hover { background: var(--m-hover); }
 
 /* 任何设了 display 的类都会盖过 hidden 属性自带的 display:none。
    .identity-form 就是这么让「注册完成后藏掉表单」失效的：JS 设了 hidden，

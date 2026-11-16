@@ -31,6 +31,7 @@ from .terminal_sso import TerminalSsoStore, BOOTSTRAP_SECONDS, TICKET_SECONDS, T
 from .terminal_server_auth import terminal_player
 from .terminal_access import TerminalAccessStore
 from .terminal_access_api import terminal_access_router
+from .password_reset import password_reset_router
 
 
 WEB_ROOT = ROOT / "web"
@@ -63,6 +64,7 @@ app = FastAPI(
 )
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(terminal_access_router(lambda: settings, lambda: store, lambda: terminal_access))
+app.include_router(password_reset_router(lambda: settings, lambda: store))
 
 
 @app.get("/healthz", include_in_schema=False)
@@ -297,6 +299,11 @@ class LoginRequest(BaseModel):
 class ProfileRequest(BaseModel):
     username: str = Field(min_length=3, max_length=16)
     nickname: str = Field(min_length=1, max_length=64)
+    # 以下可选；不传表示不改。具体规则见 app/profile_fields.py。
+    bio: str | None = Field(default=None, max_length=400)
+    birthday: str | None = Field(default=None, max_length=10)
+    gender: str | None = Field(default=None, max_length=8)
+    location: str | None = Field(default=None, max_length=200)
 
 
 class BindEmailRequest(BaseModel):
@@ -558,12 +565,12 @@ def verify_email(token: str = "", continue_to: str = "") -> RedirectResponse:
 @app.post("/api/account/login")
 def login(payload: LoginRequest, response: Response) -> dict:
     try:
-        account = store.authenticate(payload.identity.strip(), payload.password)
+        authenticated = store.authenticate_web_session(payload.identity.strip(), payload.password, settings.web_session_days)
     except PermissionError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
-    if account is None:
+    if authenticated is None:
         raise HTTPException(status_code=401, detail="账号或密码不正确")
-    raw = store.create_web_session(account.id, settings.web_session_days)
+    account, raw = authenticated
     response.set_cookie(
         "muxi_session",
         raw,
@@ -595,10 +602,16 @@ def update_profile(payload: ProfileRequest, request: Request) -> dict:
         raise HTTPException(status_code=422, detail="用户名只能使用 3–16 位字母、数字和下划线")
     if not nickname:
         raise HTTPException(status_code=422, detail="昵称不能为空")
+    profile = {
+        name: getattr(payload, name)
+        for name in ("bio", "birthday", "gender", "location")
+        if getattr(payload, name) is not None
+    }
     try:
-        updated = store.update_profile(account.id, username, nickname)
+        updated = store.update_profile(account.id, username, nickname, profile)
     except ValueError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
+        status = 409 if "用户名" in str(error) else 422
+        raise HTTPException(status_code=status, detail=str(error)) from error
     return {"user": updated.public()}
 
 
@@ -865,9 +878,14 @@ def authorize(
     if account is None:
         relative = request.url.path + (f"?{request.url.query}" if request.url.query else "")
         return RedirectResponse(f"/login?continue={quote(relative, safe='')}", status_code=303)
-    code = store.create_authorization_code(
-        client.client_id, account.id, redirect_uri, normalized_scope, code_challenge, nonce
-    )
+    try:
+        code = store.create_authorization_code(
+            client.client_id, account.id, redirect_uri, normalized_scope, code_challenge, nonce,
+            session=request.cookies.get("muxi_session", ""),
+        )
+    except ValueError:
+        relative = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        return RedirectResponse(f"/login?continue={quote(relative, safe='')}", status_code=303)
     destination = append_query(redirect_uri, code=code, state=state, iss=settings.issuer)
     return RedirectResponse(destination, status_code=303)
 
@@ -915,9 +933,9 @@ def id_token_for(account: Account, client_id: str, nonce: str | None) -> str:
     return signer.id_token(claims)
 
 
-def issue_tokens(account: Account, client_id: str, scope: str, nonce: str | None = None) -> dict:
-    access = store.issue_access_token(account.id, client_id, scope, settings.access_token_seconds)
-    refresh = store.issue_refresh_token(account.id, client_id, scope, settings.refresh_token_days)
+def issue_tokens(account: Account, client_id: str, scope: str, nonce: str | None = None,
+                 *, access: str, refresh: str) -> dict:
+    # Credentials are minted in the same transaction that consumes the grant.
     result = {
         "access_token": access,
         "token_type": "Bearer",
@@ -946,30 +964,31 @@ async def token(request: Request):
         verifier = form.get("code_verifier", "")
         if not code or not verifier or not store.redirect_allowed(client, redirect_uri):
             return oauth_error("invalid_grant", "invalid authorization code request")
-        consumed = store.consume_authorization_code(code, client_id, redirect_uri, verifier)
+        consumed = store.exchange_authorization_code(
+            code, client_id, redirect_uri, verifier, settings.access_token_seconds, settings.refresh_token_days
+        )
         if consumed is None:
             return oauth_error("invalid_grant", "authorization code is invalid, expired, used, or PKCE failed")
-        account, scope, nonce = consumed
+        account, scope, nonce, access, refresh = consumed
         return JSONResponse(
-            issue_tokens(account, client_id, scope, nonce),
+            issue_tokens(account, client_id, scope, nonce, access=access, refresh=refresh),
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )
 
     if grant_type == "refresh_token":
         raw_refresh = form.get("refresh_token", "")
-        consumed = store.consume_refresh_token(raw_refresh, client_id) if raw_refresh else None
+        try:
+            consumed = store.rotate_refresh_token(
+                raw_refresh, client_id, form.get("scope", "").strip(),
+                settings.access_token_seconds, settings.refresh_token_days,
+            ) if raw_refresh else None
+        except ValueError:
+            return oauth_error("invalid_scope", "scope may only be narrowed during refresh")
         if consumed is None:
             return oauth_error("invalid_grant", "refresh token is invalid, expired, or already rotated")
-        account, scope = consumed
-        requested_scope = form.get("scope", "").strip()
-        if requested_scope:
-            requested = set(requested_scope.split())
-            original = set(scope.split())
-            if not requested.issubset(original):
-                return oauth_error("invalid_scope", "scope may only be narrowed during refresh")
-            scope = " ".join(item for item in scope.split() if item in requested)
+        account, scope, access, refresh = consumed
         return JSONResponse(
-            issue_tokens(account, client_id, scope),
+            issue_tokens(account, client_id, scope, access=access, refresh=refresh),
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )
 

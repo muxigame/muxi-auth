@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 from .security import hash_password, needs_rehash, pkce_s256, random_token, token_hash, utc_now, verify_password
 from .external_identity import upstream_subject as verified_upstream_subject
+from . import profile_fields
 
 
 def iso(value: datetime) -> str:
@@ -40,6 +41,11 @@ class Account:
     last_login_at: str | None
     #: 头像内容的指纹。为 None 表示没设过头像；用在 URL 上让浏览器换图时不吃旧缓存。
     avatar_etag: str | None = None
+    #: 账户页里自愿填写的资料（profile_fields）。不进 OIDC claims。
+    bio: str = ""
+    birthday: str | None = None
+    gender: str = ""
+    location: str = ""
 
     def claims(self) -> dict:
         claims = {
@@ -71,6 +77,12 @@ class Account:
             "avatarUrl": f"/api/account/avatar/{self.uid}?v={self.avatar_etag}" if self.avatar_etag else None,
             "createdAt": self.created_at,
             "lastLoginAt": self.last_login_at,
+            "profile": {
+                "bio": self.bio,
+                "birthday": self.birthday,
+                "gender": self.gender,
+                "location": self.location,
+            },
         }
 
 
@@ -162,6 +174,31 @@ class Store:
                     account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
                     token_hash TEXT NOT NULL UNIQUE,
                     expires_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    token_hash TEXT PRIMARY KEY,
+                    account_id INTEGER NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
+                    email_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS password_resets_expiry ON password_resets(expires_at);
+                CREATE TABLE IF NOT EXISTS password_reset_requests (
+                    id INTEGER PRIMARY KEY,
+                    email_hash TEXT NOT NULL,
+                    client_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS password_reset_requests_time ON password_reset_requests(created_at);
+                CREATE INDEX IF NOT EXISTS password_reset_requests_email ON password_reset_requests(email_hash,created_at);
+                CREATE INDEX IF NOT EXISTS password_reset_requests_client ON password_reset_requests(client_hash,created_at);
+                CREATE TABLE IF NOT EXISTS account_profiles (
+                    account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+                    bio TEXT NOT NULL DEFAULT '',
+                    birthday TEXT,
+                    gender TEXT NOT NULL DEFAULT '',
+                    location TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS account_avatars (
                     account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
@@ -439,11 +476,14 @@ class Store:
         return """
             SELECT a.*, e.email AS primary_email,
                    COALESCE(e.verified,0) AS primary_email_verified,
-                   v.etag AS avatar_etag
+                   v.etag AS avatar_etag,
+                   p.bio AS profile_bio, p.birthday AS profile_birthday,
+                   p.gender AS profile_gender, p.location AS profile_location
             FROM accounts a
             LEFT JOIN account_emails e
               ON e.account_id=a.id AND e.is_primary=1
             LEFT JOIN account_avatars v ON v.account_id=a.id
+            LEFT JOIN account_profiles p ON p.account_id=a.id
         """
 
     @staticmethod
@@ -463,6 +503,10 @@ class Store:
             created_at=str(row["created_at"]),
             last_login_at=row["last_login_at"],
             avatar_etag=str(row["avatar_etag"]) if _has(row, "avatar_etag") and row["avatar_etag"] else None,
+            bio=str(row["profile_bio"] or "") if _has(row, "profile_bio") else "",
+            birthday=row["profile_birthday"] if _has(row, "profile_birthday") else None,
+            gender=str(row["profile_gender"] or "") if _has(row, "profile_gender") else "",
+            location=str(row["profile_location"] or "") if _has(row, "profile_location") else "",
         )
 
     @staticmethod
@@ -617,6 +661,118 @@ class Store:
                 db.execute(self._account_query() + " WHERE a.id=?", (account_id,)).fetchone()
             )
 
+    def request_password_reset(self, email: str, client_hash: str) -> tuple[Account, str] | None:
+        """Reserve one mail attempt without exposing account existence to the caller's response.
+
+        Only hashes of request identities persist. Accepted unknown addresses count toward
+        the same limits; the global rolling-hour cap also bounds the request table size.
+        Issuing a newer ticket replaces an earlier ticket, even if mail delivery later fails.
+        """
+        if len(client_hash) != 64 or any(c not in "0123456789abcdef" for c in client_hash):
+            raise ValueError("Client identity must be a SHA256 digest")
+        normalized_email = email.strip().lower()
+        email_hash = token_hash(normalized_email)
+        with self._lock, self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            now = utc_now()
+            stamp = iso(now)
+            db.execute("DELETE FROM password_reset_requests WHERE created_at<=?", (iso(now-timedelta(hours=1)),))
+            db.execute("DELETE FROM password_resets WHERE expires_at<=?", (stamp,))
+            counts = db.execute("""SELECT COUNT(*) AS total,
+                COALESCE(SUM(email_hash=?),0) AS email_count,
+                COALESCE(SUM(client_hash=?),0) AS client_count,
+                COALESCE(SUM(email_hash=? AND created_at>?),0) AS cooldown
+                FROM password_reset_requests""",
+                (email_hash, client_hash, email_hash, iso(now-timedelta(seconds=60)))).fetchone()
+            if counts["total"] >= 100 or counts["email_count"] >= 3 or counts["client_count"] >= 10 or counts["cooldown"]:
+                return None
+            db.execute("INSERT INTO password_reset_requests(email_hash,client_hash,created_at) VALUES(?,?,?)",
+                (email_hash, client_hash, stamp))
+            row = db.execute(self._account_query() + " WHERE e.email=? COLLATE NOCASE AND e.verified=1",
+                (normalized_email,)).fetchone()
+            account = self._account(row)
+            if account is None:
+                return None
+            raw = random_token(32)
+            db.execute("DELETE FROM password_resets WHERE account_id=?", (account.id,))
+            db.execute("INSERT INTO password_resets(token_hash,account_id,email_hash,created_at,expires_at) VALUES(?,?,?,?,?)",
+                (token_hash(raw), account.id, email_hash, stamp, iso(now+timedelta(minutes=15))))
+            return account, raw
+
+    @staticmethod
+    def _valid_password_reset_token(raw: str) -> bool:
+        return isinstance(raw, str) and len(raw) == 43 and all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for c in raw)
+
+    def cancel_password_reset(self, raw_token: str) -> bool:
+        """Cancel only this delivery's ticket; a concurrent newer ticket survives."""
+        if not self._valid_password_reset_token(raw_token):
+            return False
+        with self._lock, self.connect() as db:
+            return db.execute("DELETE FROM password_resets WHERE token_hash=?", (token_hash(raw_token),)).rowcount > 0
+
+    @staticmethod
+    def _revoke_password_reset_sessions(db, account_id: int, stamp: str) -> None:
+        db.execute("DELETE FROM web_sessions WHERE account_id=?", (account_id,))
+        for table in ("access_tokens", "refresh_tokens"):
+            db.execute(f"UPDATE {table} SET revoked_at=? WHERE account_id=? AND revoked_at IS NULL", (stamp, account_id))
+        for table in ("authorization_codes", "external_oauth_states", "external_binding_pending", "email_verifications", "password_resets"):
+            db.execute(f"DELETE FROM {table} WHERE account_id=?", (account_id,))
+        # Signup tickets predate an account_id column and can also resume login to
+        # an existing binding. Revoke tickets for this account's verified identities.
+        db.execute("""DELETE FROM external_signups WHERE EXISTS (
+            SELECT 1 FROM external_identities i WHERE i.account_id=? AND (
+                i.provider_subject=external_signups.provider_subject OR
+                (i.provider=external_signups.provider AND i.upstream_subject IS NOT NULL AND i.upstream_subject<>''
+                 AND i.upstream_subject=external_signups.upstream_subject)))""", (account_id,))
+        # These optional tables are initialized by their existing stores. Do not enable
+        # a terminal feature merely to revoke any credentials already present.
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "terminal_bootstraps" in tables:
+            for table in ("terminal_proofs", "terminal_tickets"):
+                if table in tables:
+                    db.execute(f"DELETE FROM {table} WHERE bootstrap_hash IN (SELECT secret_hash FROM terminal_bootstraps WHERE account_id=?)", (account_id,))
+            db.execute("DELETE FROM terminal_bootstraps WHERE account_id=?", (account_id,))
+        for table in ("terminal_access_requests", "terminal_access_connections"):
+            if table in tables:
+                db.execute(f"DELETE FROM {table} WHERE account_id=?", (account_id,))
+
+    def consume_password_reset(self, raw_token: str, new_password: str) -> Account | None:
+        """Change the password and revoke existing authority in one SQLite transaction."""
+        if not isinstance(new_password, str) or not 10 <= len(new_password) <= 128:
+            raise ValueError("密码须为 10–128 个字符")
+        if not self._valid_password_reset_token(raw_token):
+            return None
+        with self._lock, self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            now = utc_now()
+            row = db.execute("""SELECT r.account_id,r.email_hash,e.email FROM password_resets r
+                JOIN account_emails e ON e.account_id=r.account_id AND e.is_primary=1 AND e.verified=1
+                WHERE r.token_hash=? AND r.expires_at>?""", (token_hash(raw_token), iso(now))).fetchone()
+            if row is None or not hmac.compare_digest(row["email_hash"], token_hash(row["email"].strip().lower())):
+                return None
+            # Only a live, correctly bound ticket reaches the expensive password hash.
+            db.execute("UPDATE accounts SET password_hash=? WHERE id=?", (hash_password(new_password), row["account_id"]))
+            self._revoke_password_reset_sessions(db, int(row["account_id"]), iso(now))
+            return self._account(db.execute(self._account_query() + " WHERE a.id=?", (row["account_id"],)).fetchone())
+
+    def _authenticate_in_transaction(self, db, identity: str, password: str, now: datetime) -> Account | None:
+        row = db.execute(
+            self._account_query()
+            + """ WHERE a.username=? COLLATE NOCASE
+                   OR CAST(a.uid AS TEXT)=?
+                   OR e.email=? COLLATE NOCASE""",
+            (identity, identity, identity),
+        ).fetchone()
+        if row is None or row["password_hash"] is None or not verify_password(str(row["password_hash"]), password):
+            return None
+        account = self._account(row)
+        if account is None or not account.email_verified:
+            raise PermissionError("请先完成邮箱验证")
+        if needs_rehash(str(row["password_hash"])):
+            db.execute("UPDATE accounts SET password_hash=? WHERE id=?", (hash_password(password), account.id))
+        db.execute("UPDATE accounts SET last_login_at=? WHERE id=?", (iso(now), account.id))
+        return self._account(db.execute(self._account_query() + " WHERE a.id=?", (account.id,)).fetchone())
+
     def authenticate(self, identity: str, password: str) -> Account | None:
         with self._lock, self.connect() as db:
             row = db.execute(
@@ -638,6 +794,19 @@ class Store:
             return self._account(
                 db.execute(self._account_query() + " WHERE a.id=?", (account.id,)).fetchone()
             )
+
+    def authenticate_web_session(self, identity: str, password: str, days: int) -> tuple[Account, str] | None:
+        """Keep password verification and session issuance serialized with a reset."""
+        with self._lock, self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            now = utc_now()
+            account = self._authenticate_in_transaction(db, identity.strip(), password, now)
+            if account is None:
+                return None
+            raw = random_token(40)
+            db.execute("INSERT INTO web_sessions(token_hash,account_id,created_at,expires_at) VALUES(?,?,?,?)",
+                (token_hash(raw), account.id, iso(now), iso(now+timedelta(days=days))))
+            return account, raw
 
     def create_web_session(self, account_id: int, days: int) -> str:
         raw = random_token(40)
@@ -745,10 +914,20 @@ class Store:
         scope: str,
         code_challenge: str,
         nonce: str | None,
+        *,
+        session: str | None = None,
     ) -> str:
         raw = random_token(32)
         now = utc_now()
         with self._lock, self.connect() as db:
+            if session is not None:
+                db.execute("BEGIN IMMEDIATE")
+                now = utc_now()
+                if not db.execute(
+                    "SELECT 1 FROM web_sessions WHERE token_hash=? AND account_id=? AND expires_at>?",
+                    (token_hash(session), account_id, iso(now)),
+                ).fetchone():
+                    raise ValueError("login_required")
             db.execute(
                 """INSERT INTO authorization_codes
                    (code_hash,client_id,account_id,redirect_uri,scope,code_challenge,nonce,created_at,expires_at)
@@ -759,6 +938,66 @@ class Store:
                 ),
             )
         return raw
+
+    @staticmethod
+    def _issue_oauth_pair(db, account_id: int, client_id: str, scope: str, now: datetime,
+                          access_seconds: int, refresh_days: int) -> tuple[str, str]:
+        access, refresh = random_token(40), random_token(48)
+        for table, raw, expires in (
+            ("access_tokens", access, now+timedelta(seconds=access_seconds)),
+            ("refresh_tokens", refresh, now+timedelta(days=refresh_days)),
+        ):
+            db.execute(f"INSERT INTO {table}(token_hash,account_id,client_id,scope,created_at,expires_at) VALUES(?,?,?,?,?,?)",
+                (token_hash(raw), account_id, client_id, scope, iso(now), iso(expires)))
+        return access, refresh
+
+    def exchange_authorization_code(self, raw: str, client_id: str, redirect_uri: str,
+                                    verifier: str, access_seconds: int, refresh_days: int
+                                    ) -> tuple[Account, str, str | None, str, str] | None:
+        """Consume a code and issue both tokens without a reset interleaving."""
+        with self._lock, self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            now = utc_now()
+            row = db.execute("""SELECT * FROM authorization_codes WHERE code_hash=?
+                AND client_id=? AND redirect_uri=? AND used_at IS NULL AND expires_at>?""",
+                (token_hash(raw), client_id, redirect_uri, iso(now))).fetchone()
+            if row is None:
+                return None
+            try:
+                challenge = pkce_s256(verifier)
+            except (UnicodeError, AttributeError):
+                return None
+            if not hmac.compare_digest(str(row["code_challenge"]), challenge):
+                return None
+            account = self._account(db.execute(self._account_query()+" WHERE a.id=?", (row["account_id"],)).fetchone())
+            if account is None:
+                return None
+            db.execute("UPDATE authorization_codes SET used_at=? WHERE code_hash=?", (iso(now), token_hash(raw)))
+            scope = str(row["scope"])
+            access, refresh = self._issue_oauth_pair(db, account.id, client_id, scope, now, access_seconds, refresh_days)
+            return account, scope, row["nonce"], access, refresh
+
+    def rotate_refresh_token(self, raw: str, client_id: str, requested_scope: str | None,
+                             access_seconds: int, refresh_days: int) -> tuple[Account, str, str, str] | None:
+        """Rotate and issue the replacement pair in the same write transaction."""
+        with self._lock, self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            now = utc_now()
+            row = db.execute("""SELECT * FROM refresh_tokens WHERE token_hash=? AND client_id=?
+                AND revoked_at IS NULL AND expires_at>?""", (token_hash(raw), client_id, iso(now))).fetchone()
+            if row is None:
+                return None
+            scope = str(row["scope"])
+            if requested_scope and requested_scope.strip():
+                if not set(requested_scope.split()).issubset(set(scope.split())):
+                    raise ValueError("invalid_scope")
+                scope = " ".join(dict.fromkeys(requested_scope.split()))
+            account = self._account(db.execute(self._account_query()+" WHERE a.id=?", (row["account_id"],)).fetchone())
+            if account is None:
+                return None
+            db.execute("UPDATE refresh_tokens SET revoked_at=? WHERE token_hash=?", (iso(now), token_hash(raw)))
+            access, refresh = self._issue_oauth_pair(db, account.id, client_id, scope, now, access_seconds, refresh_days)
+            return account, scope, access, refresh
 
     def consume_authorization_code(
         self, raw: str, client_id: str, redirect_uri: str, verifier: str
@@ -871,7 +1110,9 @@ class Store:
                 db.execute(self._account_query() + " WHERE a.id=?", (int(row["id"]),)).fetchone()
             )
 
-    def update_profile(self, account_id: int, username: str, nickname: str) -> Account:
+    def update_profile(self, account_id: int, username: str, nickname: str, profile: dict | None = None) -> Account:
+        # 先校验，校验失败时用户名和昵称也不动。
+        changes = profile_fields.normalize(profile or {})
         with self._lock, self.connect() as db:
             try:
                 db.execute(
@@ -880,6 +1121,16 @@ class Store:
                 )
             except sqlite3.IntegrityError as error:
                 raise ValueError("该用户名已经被使用") from error
+            if changes:
+                db.execute(
+                    "INSERT OR IGNORE INTO account_profiles(account_id,updated_at) VALUES(?,?)",
+                    (account_id, iso(utc_now())),
+                )
+                columns = ",".join(f"{name}=?" for name in changes)  # 键名已由 normalize 白名单限定
+                db.execute(
+                    f"UPDATE account_profiles SET {columns},updated_at=? WHERE account_id=?",
+                    (*changes.values(), iso(utc_now()), account_id),
+                )
             account = self._account(
                 db.execute(self._account_query() + " WHERE a.id=?", (account_id,)).fetchone()
             )

@@ -1,5 +1,11 @@
 # muxi 账户
 
+## 发布规则
+
+**只能通过 CI 发布上线**：合并到 `master` 后推 `v*` tag，由 `.github/workflows/deploy.yml` 测试、打包并执行 `scripts/deploy.sh`。
+禁止手动登录服务器构建镜像、叠加 Compose 或替换文件；CI 发布不了说明 CI 有问题，应修 CI 再发布。
+生产 Compose、镜像和部署脚本都以本仓为准，服务器上不保留仓库之外的配置（`.env` 与 `data/` 除外）。
+
 ## Terminal platform SSO (not deployed)
 
 `MUXI_TERMINAL_SSO_SERVER_KEY` is a dedicated 32–512 printable-ASCII server key for
@@ -107,6 +113,13 @@ CZL 的 Cookie 由浏览器在 CZL 域名下接收；不能在 muxi 后端抓取
 部署前必须备份 SQLite 数据库（运行中用 SQLite backup，不只拷贝 WAL 数据库主文件）。首次启动添加状态上下文/待确认/审计表，并将有可靠上游信息的旧 `czl` 关联拆为 QQ/微信关联；无法识别的旧数据保留，要求通过原渠道重新登录更新信息，不猜测、不静默丢弃。回滚须配套恢复数据库备份，旧代码不理解新渠道映射。未经授权不要直接发布版本标签或重建生产容器。
 
 开发测试安装 `requirements-dev.txt`，再执行 `python -m unittest discover -s tests`。测试数据库、签名密钥应通过 `MUXI_DATABASE_PATH`、`MUXI_SIGNING_KEY_PATH` 指向临时目录。模拟授权测试不代替真人 QQ/微信授权验收。
+
+## 邮箱找回密码
+
+登录页“创建一个”旁的“找回密码”进入 `/forgot-password`，已验证的主邮箱会收到 15 分钟有效、一次性的重置链接。
+重置页 `/reset-password` 从 URL fragment 读取令牌并立即清除，只通过同源 JSON 正文提交新密码；数据库只存令牌的 SHA-256。
+请求接口统一返回 202 和相同文案；按邮箱、客户端地址和全局窗口限流（邮箱 60 秒冷却、每小时 3 次，客户端每小时 10 次，全局每小时 100 次）。
+重置成功会在同一事务里更新密码并撤销账户中心会话、访问/刷新令牌、未用授权码和终端派生凭据，然后发送不含密码的安全通知，不自动登录。
 
 ## 预置客户端
 

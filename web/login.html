@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light dark">
   <title>登录 · muxi 账户</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" href="/static/identity.css">
+  <link rel="stylesheet" href="/static/theme.css?v=theme-20261115">
+  <link rel="stylesheet" href="/static/style.css?v=theme-20261115">
+  <link rel="stylesheet" href="/static/identity.css?v=theme-20261115">
 </head>
 <body class="identity-body">
   <main class="identity-stage">
@@ -33,6 +34,7 @@
         </label>
         <div class="identity-inline-help">
           还没有账户？<a href="/register" data-preserve-continue>创建一个</a>
+          <span aria-hidden="true"> · </span><a href="/forgot-password" data-preserve-continue>找回密码</a>
         </div>
         <div class="identity-actions">
           <button type="submit" class="identity-primary">登录</button>
@@ -51,6 +53,6 @@
     <span>muxi 账户</span>
     <span>OAuth 2.0 · OpenID Connect</span>
   </footer>
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js?v=password-reset-20261104" defer></script>
 </body>
 </html>

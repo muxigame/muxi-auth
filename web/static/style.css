@@ -1,2 +1,36 @@
-:root{color-scheme:dark;--bg:#090a0d;--panel:#12141a;--line:#2b303b;--text:#f4f5f7;--muted:#8d96a7;--accent:#79a8ff;--danger:#ff8080}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 20% 5%,#17223b 0,transparent 35%),var(--bg);color:var(--text);font:15px/1.6 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}a{color:inherit}.nav{height:70px;display:flex;align-items:center;justify-content:space-between;max-width:1080px;margin:auto;padding:0 24px}.brand{text-decoration:none;font-weight:850;letter-spacing:.12em}.brand span{color:var(--accent)}.navlinks{display:flex;gap:18px;color:var(--muted)}.navlinks a{text-decoration:none}.shell{max-width:1080px;margin:0 auto;padding:80px 24px;display:grid;grid-template-columns:1.1fr .75fr;gap:8vw;align-items:center}.hero h1{font-size:clamp(50px,7vw,88px);line-height:.98;letter-spacing:-.055em;margin:12px 0 26px}.hero p{max-width:620px;color:var(--muted);font-size:17px}.eyebrow{font:800 11px/1 ui-monospace,SFMono-Regular,monospace;letter-spacing:.18em;color:var(--accent)}.card{background:rgba(18,20,26,.94);border:1px solid var(--line);padding:34px;box-shadow:0 35px 90px rgba(0,0,0,.35)}.card h2{font-size:32px;margin:0 0 6px}.card>p{color:var(--muted);margin-top:0}.form{display:grid;gap:17px;margin-top:28px}.field{display:grid;gap:7px}.field span{font-size:12px;color:#c3c8d2}.field input{height:50px;border:1px solid #343a47;background:#0c0e13;color:white;padding:0 14px;font:inherit;outline:none;border-radius:5px}.field input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(121,168,255,.11)}button,.button{height:48px;border:0;border-radius:5px;background:var(--accent);color:#08101e;font-weight:850;font:inherit;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;padding:0 18px}.button.secondary,button.secondary{background:#202530;color:#dce2ec;border:1px solid #343a47}.actions{display:flex;gap:10px;flex-wrap:wrap}.message{padding:11px 13px;background:#17243d;border-left:3px solid var(--accent);margin:18px 0 0}.message.error{background:#30181d;border-color:var(--danger);color:#ffc3c3}.hint{font-size:12px;color:var(--muted)}.profile{display:grid;gap:0;margin:25px 0}.profile div{display:flex;justify-content:space-between;gap:20px;padding:14px 0;border-top:1px solid var(--line)}.profile span:first-child{color:var(--muted)}code{font-family:ui-monospace,SFMono-Regular,monospace;color:#cde0ff}.footer{max-width:1080px;margin:auto;padding:30px 24px 60px;color:#596273;font-size:12px}@media(max-width:760px){.shell{grid-template-columns:1fr;padding-top:40px;gap:50px}.hero h1{font-size:52px}.nav{height:62px}.card{padding:24px}}
-
+/* 首页（/）与身份页的基础样式。颜色来自 theme.css。 */
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--m-bg-subtle);color:var(--m-text);font:15px/1.6 var(--m-font)}
+a{color:inherit}
+.nav{height:64px;display:flex;align-items:center;justify-content:space-between;max-width:1080px;margin:auto;padding:0 24px}
+.brand{text-decoration:none;font-weight:700;letter-spacing:.04em}
+.brand span{color:var(--m-muted);font-weight:500}
+.navlinks{display:flex;gap:18px;color:var(--m-muted)}
+.navlinks a{text-decoration:none}
+.navlinks a:hover{color:var(--m-text)}
+.shell{max-width:1080px;margin:0 auto;padding:72px 24px;display:grid;grid-template-columns:1.1fr .75fr;gap:7vw;align-items:center}
+.hero h1{font-size:clamp(44px,6vw,76px);line-height:1.02;letter-spacing:-.04em;margin:12px 0 22px;font-weight:650}
+.hero p{max-width:600px;color:var(--m-muted);font-size:17px}
+.eyebrow{font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.16em;color:var(--m-accent)}
+.card{background:var(--m-surface);border:1px solid var(--m-line);border-radius:12px;padding:32px;box-shadow:var(--m-shadow)}
+.card h2{font-size:28px;margin:8px 0 6px;font-weight:600}
+.card>p{color:var(--m-muted);margin-top:0}
+.form{display:grid;gap:16px;margin-top:24px}
+.field{display:grid;gap:6px}
+.field span{font-size:13px;color:var(--m-text)}
+.field input{height:42px;border:1px solid var(--m-input-line);background:var(--m-surface);color:var(--m-text);padding:0 12px;font:inherit;outline:none;border-radius:8px}
+.field input:focus{border-color:var(--m-accent);box-shadow:0 0 0 3px var(--m-info-bg)}
+button,.button{height:40px;border:0;border-radius:8px;background:var(--m-accent);color:var(--m-on-accent);font:600 14px var(--m-font);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;padding:0 18px}
+.button:hover{background:var(--m-accent-hover)}
+.button.secondary,button.secondary{background:var(--m-surface);color:var(--m-text);border:1px solid var(--m-line-strong)}
+.button.secondary:hover,button.secondary:hover{background:var(--m-hover)}
+.actions{display:flex;gap:10px;flex-wrap:wrap}
+.message{padding:10px 12px;border-radius:8px;background:var(--m-info-bg);margin:18px 0 0}
+.message.error{background:var(--m-danger-bg);color:var(--m-danger)}
+.hint{font-size:12px;color:var(--m-muted)}
+.profile{display:grid;gap:0;margin:25px 0}
+.profile div{display:flex;justify-content:space-between;gap:20px;padding:14px 0;border-top:1px solid var(--m-line)}
+.profile span:first-child{color:var(--m-muted)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.footer{max-width:1080px;margin:auto;padding:30px 24px 60px;color:var(--m-faint);font-size:12px}
+@media(max-width:760px){.shell{grid-template-columns:1fr;padding-top:36px;gap:40px}.hero h1{font-size:46px}.nav{height:58px}.card{padding:24px}}

@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
+.local-validation/
 data/*.db
 data/*.db-*
 data/*.pem

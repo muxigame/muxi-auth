@@ -1,5 +1,7 @@
 name: Deploy tagged release
 
+# The only path to production. Merge to master, then push a vX.Y.Z tag.
+# If this workflow cannot ship a change, fix the workflow; never deploy by hand.
 on:
   push:
     tags:
@@ -31,7 +33,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements*.txt
 
       - name: Test
         env:
@@ -40,6 +42,9 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -r requirements-dev.txt
           PYTHONPATH=. python -m unittest discover -s tests -v
+
+      - name: Build production image
+        run: docker build -t muxi-auth:ci .
 
       - name: Create release archive
         run: git archive --format=tar.gz --output=muxi-auth-release.tar.gz "$GITHUB_SHA"
@@ -60,15 +65,17 @@ jobs:
         env:
           MUXI_CZL_CLIENT_ID: ${{ secrets.MUXI_CZL_CLIENT_ID }}
           MUXI_CZL_CLIENT_SECRET: ${{ secrets.MUXI_CZL_CLIENT_SECRET }}
+          RELEASE: ${{ github.ref_name }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
-          command_timeout: 10m
-          envs: MUXI_CZL_CLIENT_ID,MUXI_CZL_CLIENT_SECRET
+          command_timeout: 15m
+          envs: MUXI_CZL_CLIENT_ID,MUXI_CZL_CLIENT_SECRET,RELEASE
           script: |
+            set -e
             mkdir -p /opt/muxi-auth/incoming
             cp /opt/muxi-auth/incoming/scripts/deploy.sh /opt/muxi-auth/incoming/deploy.sh
             chmod 0750 /opt/muxi-auth/incoming/deploy.sh
-            /opt/muxi-auth/incoming/deploy.sh /opt/muxi-auth/incoming/muxi-auth-release.tar.gz
+            /opt/muxi-auth/incoming/deploy.sh /opt/muxi-auth/incoming/muxi-auth-release.tar.gz "$RELEASE"

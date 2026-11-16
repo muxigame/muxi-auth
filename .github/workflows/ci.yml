@@ -30,5 +30,7 @@ jobs:
           MUXI_ISSUER: http://127.0.0.1:9000
           MUXI_AUTH_DEV_VERIFY: "1"
         run: python -c "from app.main import app; print(app.title)"
-      - name: Build container
+      - name: Check deploy script
+        run: bash -n scripts/deploy.sh
+      - name: Build production image
         run: docker build -t muxi-auth:ci .

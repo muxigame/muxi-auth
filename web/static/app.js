@@ -2,6 +2,68 @@
 
 const $ = (id) => document.getElementById(id);
 
+// Keep the mail proof only in this closure and remove it from the address bar
+// before any asynchronous work. Never put it in a cookie, storage, or query.
+(() => {
+  const form = $('reset-password-form');
+  if (!form) return;
+  let token = new URLSearchParams(location.hash.slice(1)).get('token') || '';
+  history.replaceState(null, '', location.pathname + location.search);
+  const submit = form.querySelector('button[type="submit"]');
+  const invalidMessage = '链接已失效或已使用，请重新申请';
+  let busy = false;
+  let completed = false;
+  form.hidden = !token;
+  submit.disabled = !token;
+  if (!token) showMessage(invalidMessage, true);
+
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    if (busy || completed) return;
+    if (!token) { showMessage(invalidMessage, true); return; }
+    const fields = Object.fromEntries(new FormData(form));
+    const password = fields.password || '';
+    const passwordConfirm = fields.password_confirm || '';
+    if (Array.from(password).length < 10 || Array.from(password).length > 128) {
+      showMessage('新密码须为 10–128 位。', true);
+      return;
+    }
+    if (password !== passwordConfirm) {
+      showMessage('两次输入的密码不一致。', true);
+      return;
+    }
+    busy = true;
+    submit.disabled = true;
+    try {
+      await api('/api/account/password-reset/confirm', {
+        method: 'POST', cache: 'no-store', referrerPolicy: 'no-referrer',
+        headers: { 'X-Muxi-Account-Action': '1' },
+        body: JSON.stringify({ token, password, password_confirm: passwordConfirm }),
+      });
+      completed = true;
+      token = '';
+      form.reset();
+      form.hidden = true;
+      $('message').hidden = true;
+      $('reset-password-done').hidden = false;
+    } catch (error) {
+      showMessage(error.status === 400 ? invalidMessage : '暂时无法更新密码，请稍后重试。', true);
+    } finally {
+      busy = false;
+      submit.disabled = completed || !token;
+    }
+  };
+  window.addEventListener('pagehide', () => {
+    token = '';
+    form.reset();
+    form.hidden = true;
+    submit.disabled = true;
+  });
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted && !completed) showMessage(invalidMessage, true);
+  });
+})();
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -9,7 +71,11 @@ async function api(path, options = {}) {
   });
   let body = {};
   try { body = await response.json(); } catch {}
-  if (!response.ok) throw new Error(body.detail || body.error_description || '请求失败');
+  if (!response.ok) {
+    const error = new Error(body.detail || body.error_description || '请求失败');
+    error.status = response.status;
+    throw error;
+  }
   return body;
 }
 
@@ -23,7 +89,10 @@ function showMessage(text, error = false) {
 
 function continueTarget() {
   const value = new URLSearchParams(location.search).get('continue') || '/account';
-  return value.startsWith('/') && !value.startsWith('//') ? value : '/account';
+  if (!value.startsWith('/') || value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value)) return '/account';
+  try {
+    return new URL(value, location.origin).origin === location.origin ? value : '/account';
+  } catch { return '/account'; }
 }
 
 function continueQuery() { return encodeURIComponent(continueTarget()); }
@@ -385,6 +454,35 @@ if ($('login-form')) {
   wireAuthContext();
   wireExternalProviders();
 }
+
+if ($('forgot-password-form')) {
+  const form = $('forgot-password-form');
+  const submit = form.querySelector('button[type="submit"]');
+  let busy = false;
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    if (busy) return;
+    busy = true;
+    submit.disabled = true;
+    try {
+      const fields = Object.fromEntries(new FormData(form));
+      const result = await api('/api/account/password-reset/request', {
+        method: 'POST', cache: 'no-store', referrerPolicy: 'no-referrer',
+        headers: { 'X-Muxi-Account-Action': '1' },
+        body: JSON.stringify({ email: fields.email || '' }),
+      });
+      showMessage(result.message || '如果该邮箱关联可找回的账户，我们会发送一封邮件。请稍后检查收件箱和垃圾邮件。');
+    } catch {
+      showMessage('暂时无法提交申请，请稍后重试。', true);
+    } finally {
+      busy = false;
+      submit.disabled = false;
+    }
+  };
+  wireAuthContext();
+}
+
+if ($('reset-password-form')) wireAuthContext();
 
 // 注册成功：把表单换成"去收信"。只清空表单的话，页面和没提交过长得一样。
 function showRegisterDone(result) {

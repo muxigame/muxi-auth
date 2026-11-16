@@ -1,0 +1,95 @@
+/* muxi 账户全站配色。默认跟随系统；账户页可以手动指定（html[data-theme]）。
+   只定义颜色变量，不写布局。所有页面先加载这个文件。 */
+
+:root {
+  color-scheme: light;
+  --m-bg: #ffffff;
+  --m-bg-subtle: #f7f7f6;
+  --m-surface: #ffffff;
+  --m-surface-2: #f3f3f2;
+  --m-hover: #f0f0ef;
+  --m-selected: #e9e9e7;
+  --m-line: #e5e5e3;
+  --m-line-strong: #d3d3d0;
+  --m-input-line: #c9c9c6;
+  --m-text: #1f1f1f;
+  --m-muted: #6b6b69;
+  --m-faint: #9a9a97;
+  --m-accent: #0067c0;
+  --m-accent-hover: #005aa8;
+  --m-on-accent: #ffffff;
+  --m-link: #0067c0;
+  --m-focus: #0067c0;
+  --m-ok: #1a7f37;
+  --m-ok-bg: #e8f5eb;
+  --m-warn: #8a5d00;
+  --m-warn-bg: #fdf3d8;
+  --m-danger: #c42b2b;
+  --m-danger-bg: #fdeeee;
+  --m-danger-line: #f0c8c8;
+  --m-info-bg: #e9f2fb;
+  --m-shadow: 0 1px 2px rgba(0, 0, 0, .05);
+  --m-font: "Segoe UI", SegoeUI, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --m-bg: #1b1b1b;
+    --m-bg-subtle: #161616;
+    --m-surface: #222222;
+    --m-surface-2: #2a2a2a;
+    --m-hover: #2b2b2b;
+    --m-selected: #353535;
+    --m-line: #303030;
+    --m-line-strong: #424242;
+    --m-input-line: #4a4a4a;
+    --m-text: #ececec;
+    --m-muted: #a3a3a3;
+    --m-faint: #777777;
+    --m-accent: #0078d4;
+    --m-accent-hover: #1683d8;
+    --m-on-accent: #ffffff;
+    --m-link: #6cb4ff;
+    --m-focus: #6cb4ff;
+    --m-ok: #5cc26f;
+    --m-ok-bg: rgba(92, 194, 111, .12);
+    --m-warn: #e0b84f;
+    --m-warn-bg: rgba(224, 184, 79, .12);
+    --m-danger: #ff8080;
+    --m-danger-bg: rgba(255, 110, 110, .08);
+    --m-danger-line: #5a2c2c;
+    --m-info-bg: rgba(0, 120, 212, .14);
+    --m-shadow: none;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --m-bg: #1b1b1b;
+  --m-bg-subtle: #161616;
+  --m-surface: #222222;
+  --m-surface-2: #2a2a2a;
+  --m-hover: #2b2b2b;
+  --m-selected: #353535;
+  --m-line: #303030;
+  --m-line-strong: #424242;
+  --m-input-line: #4a4a4a;
+  --m-text: #ececec;
+  --m-muted: #a3a3a3;
+  --m-faint: #777777;
+  --m-accent: #0078d4;
+  --m-accent-hover: #1683d8;
+  --m-on-accent: #ffffff;
+  --m-link: #6cb4ff;
+  --m-focus: #6cb4ff;
+  --m-ok: #5cc26f;
+  --m-ok-bg: rgba(92, 194, 111, .12);
+  --m-warn: #e0b84f;
+  --m-warn-bg: rgba(224, 184, 79, .12);
+  --m-danger: #ff8080;
+  --m-danger-bg: rgba(255, 110, 110, .08);
+  --m-danger-line: #5a2c2c;
+  --m-info-bg: rgba(0, 120, 212, .14);
+  --m-shadow: none;
+}
