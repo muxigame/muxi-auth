@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>隐私说明 · muxi 账户</title>
+  <link rel="stylesheet" href="/static/theme.css?v=theme-20261115">
+  <link rel="stylesheet" href="/static/style.css?v=theme-20261115">
+  <link rel="stylesheet" href="/static/legal.css?v=20261119">
+</head>
+<body>
+  <header class="nav legal-nav">
+    <a class="brand" href="/">muxi <span>// 账户</span></a>
+    <nav class="navlinks" aria-label="页面导航">
+      <a href="/">首页</a><a href="/privacy" aria-current="page">隐私说明</a><a href="/terms">服务条款</a>
+    </nav>
+  </header>
+  <main class="legal-document">
+    <h1>隐私说明</h1>
+    <p class="legal-updated">更新日期：<time datetime="2026-11-19">2026 年 11 月 19 日</time></p>
+    <p>muxi 账户为网站、启动器和接入应用提供统一账户、登录与身份绑定服务。本说明介绍这些功能涉及的信息及你可以进行的管理操作。</p>
+
+    <h2>账户资料</h2>
+    <p>我们保存你创建账户或管理资料时提供的用户名、昵称、邮箱及邮箱验证状态，以及账户标识、创建与登录时间。你也可以上传头像或填写账户页支持的资料。设置密码时，服务保存密码哈希，用于验证登录；第三方登录不会要求你向 muxi 提供第三方账户密码。</p>
+
+    <h2>Google 与 Microsoft 登录</h2>
+    <p>当你选择 Google 或 Microsoft 登录或绑定时，服务请求 <code>openid profile email</code> 权限，以确认身份、建立或查找 muxi 账户、展示身份信息和管理绑定。我们处理提供方返回的稳定账户标识、姓名或显示名称、电子邮箱及其验证状态、身份签发方；Microsoft 还可能返回租户标识。具体信息取决于提供方实际返回的字段。</p>
+    <p>我们将提供方、稳定标识、显示名称、上述身份资料及绑定或登录时间保存在账户关联记录中。第三方邮箱可能保存在身份资料中，但不会因此自动成为已验证的 muxi 主邮箱；我们不按邮箱自动合并已有 muxi 账户。第三方授权取得的数据用于这些账户与身份功能，不用于与这些功能无关的用途。</p>
+    <p>服务通过提供方的授权和令牌接口完成登录。上游令牌用于当次身份验证，当前账户关联记录保存筛选后的身份资料，不保存上游访问令牌、刷新令牌或完整身份令牌。</p>
+
+    <h2>其他登录方式</h2>
+    <p>QQ 与微信登录通过 CZL Connect 完成。服务处理其返回的身份资料、显示名称与渠道稳定标识，用于识别所选登录方式和管理账户关联。你使用第三方登录时，浏览器也会与对应提供方或 CZL Connect 交互，其服务中的信息处理由各自的说明约定。</p>
+
+    <h2>Cookie、授权凭据与安全记录</h2>
+    <p>我们使用 Cookie 维持网页登录状态和完成绑定确认，使用短期授权状态与一次性票据衔接登录流程，并向接入应用签发访问和刷新令牌。数据库对登录会话及相关令牌保存哈希；密码也以哈希形式保存。部分短期授权流程还需要保存验证参数和待确认身份资料。</p>
+    <p>为保护账户和排查故障，服务记录登录时间、绑定、换绑与解绑事件，以及授权失败等运行信息。处理请求也可能产生服务器访问日志。请勿通过反馈邮件发送密码、登录 Cookie 或授权令牌。</p>
+
+    <h2>接入应用与信息传递</h2>
+    <p>当你使用 muxi 账户登录接入应用时，服务按该应用获准的权限提供对应 muxi 账户资料，可能包括账户标识、用户名、昵称、邮箱与验证状态等。第三方登录需要向提供方发送完成授权所需的请求；邮箱验证与找回密码需要向你指定的邮箱发送邮件。接入应用、第三方登录和邮件服务也分别参与这些功能的信息处理。</p>
+
+    <h2>解绑、注销与保留边界</h2>
+    <p>你可以在<a href="/account#security">账户页的“登录与安全”</a>管理第三方绑定。解绑前需要保留另一种可用登录方式，以避免失去账户访问能力。解绑会删除当前账户中的对应身份关联，并记录该操作，不会注销第三方账户。</p>
+    <p>你可以在<a href="/account#manage">账户页的“账号管理”</a>选择注销，按页面提示输入用户名确认。注销会删除当前账户及关联邮箱、第三方身份绑定、登录会话、令牌和头像；账户 UID 不会回收或分配给他人。此操作不等于删除各游戏或其他独立服务中的存档、资料和记录。</p>
+    <p>数据的保存与账户功能、安全排查及恢复需要有关。短期授权资料有有效期，但有效期届满不代表所有历史数据立即物理删除。注销或解绑后，已有备份、运行日志及部分临时流程记录也可能暂时保留，不会因该操作立即从所有副本中清除。</p>
+
+    <h2>联系</h2>
+    <p>如需就账户资料或本说明提出问题，请联系 <a href="mailto:roc.shento@gmail.com">roc.shento@gmail.com</a>。请说明相关账户与请求，避免附带密码或令牌。</p>
+  </main>
+  <footer class="footer legal-footer"><span>muxi 账户</span><a href="/">首页</a><a href="/terms">服务条款</a></footer>
+</body>
+</html>

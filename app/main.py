@@ -389,6 +389,16 @@ def home() -> FileResponse:
     return FileResponse(WEB_ROOT / "index.html")
 
 
+@app.get("/privacy", include_in_schema=False)
+def privacy_page() -> FileResponse:
+    return FileResponse(WEB_ROOT / "privacy.html")
+
+
+@app.get("/terms", include_in_schema=False)
+def terms_page() -> FileResponse:
+    return FileResponse(WEB_ROOT / "terms.html")
+
+
 @app.get("/login", include_in_schema=False)
 def login_page() -> FileResponse:
     return FileResponse(WEB_ROOT / "login.html")

@@ -6,6 +6,14 @@
 禁止手动登录服务器构建镜像、叠加 Compose 或替换文件；CI 发布不了说明 CI 有问题，应修 CI 再发布。
 生产 Compose、镜像和部署脚本都以本仓为准，服务器上不保留仓库之外的配置（`.env` 与 `data/` 除外）。
 
+## 第三方登录公开说明
+
+账户站公开提供 `/privacy`（隐私说明）及 `/terms`（服务条款），首页与登录页均有入口。
+Google OAuth 品牌使用 `muxi 账户`，首页为 `https://account.muxigame.com/`，
+隐私说明和服务条款分别填写该域下的 `/privacy`、`/terms`；范围只使用 `openid profile email`。
+Google 与 Microsoft 的客户端密钥只配置在服务器 `.env`，不得放进页面、Git 或日志；环境配置同样通过下一次 CI 发布加载。
+源码或环境变量已就绪不代表提供方已切到正式版，也不代表真实用户授权回调已经验收。
+
 ## Terminal platform SSO (not deployed)
 
 `MUXI_TERMINAL_SSO_SERVER_KEY` is a dedicated 32–512 printable-ASCII server key for
